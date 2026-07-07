@@ -11,6 +11,16 @@ export interface AppUser {
   phone: string;
 }
 
+export interface Teacher {
+  id: string;
+  name: string;
+  phone: string;
+  subject: string;
+  salary?: number;
+  status: "active" | "inactive";
+  joinedAt: string;
+}
+
 export interface Student {
   id: string;
   name: string;
@@ -63,6 +73,10 @@ export interface Attendance {
 interface AppContextType {
   user: AppUser | null;
   setUser: (user: AppUser | null) => void;
+  teachers: Teacher[];
+  addTeacher: (t: Omit<Teacher, "id" | "joinedAt">) => void;
+  updateTeacher: (id: string, data: Partial<Teacher>) => void;
+  deleteTeacher: (id: string) => void;
   students: Student[];
   addStudent: (s: Omit<Student, "id" | "enrolledAt">) => void;
   updateStudent: (id: string, data: Partial<Student>) => void;
@@ -86,21 +100,26 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-const STORAGE_KEY = "eduflow_data_v1";
+const STORAGE_KEY = "eduflow_data_v2";
 
 function genId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
+const SAMPLE_TEACHERS: Teacher[] = [
+  { id: "t1", name: "Rahimov Bobur", phone: "+998901110001", subject: "Matematika", salary: 2000000, status: "active", joinedAt: "2025-09-01" },
+  { id: "t2", name: "Yusupova Dilnoza", phone: "+998901110002", subject: "Ingliz tili", salary: 1800000, status: "active", joinedAt: "2025-10-01" },
+];
+
 const SAMPLE_COURSES: Course[] = [
-  { id: "c1", name: "Matematika", description: "Umumiy matematik kurs", price: 350000, duration: 3, color: "#1E3A8A" },
-  { id: "c2", name: "Ingliz tili", description: "Ingliz tili kursi", price: 450000, duration: 3, color: "#7C3AED" },
+  { id: "c1", name: "Matematika", description: "Umumiy matematik kurs", price: 350000, duration: 3, color: "#1E3A8A", teacherId: "t1" },
+  { id: "c2", name: "Ingliz tili", description: "Ingliz tili kursi", price: 450000, duration: 3, color: "#7C3AED", teacherId: "t2" },
   { id: "c3", name: "Dasturlash", description: "Python va Web dasturlash", price: 600000, duration: 6, color: "#10B981" },
 ];
 
 const SAMPLE_GROUPS: Group[] = [
-  { id: "g1", name: "Mat-A", courseId: "c1", teacherId: "u1", schedule: "Du-Cho-Ju, 09:00", maxStudents: 15, room: "204-xona" },
-  { id: "g2", name: "Ingliz-B1", courseId: "c2", teacherId: "u1", schedule: "Se-Sha-Yak, 11:00", maxStudents: 12, room: "101-xona" },
+  { id: "g1", name: "Mat-A", courseId: "c1", teacherId: "t1", schedule: "Du-Cho-Ju, 09:00", maxStudents: 15, room: "204-xona" },
+  { id: "g2", name: "Ingliz-B1", courseId: "c2", teacherId: "t2", schedule: "Se-Sha-Yak, 11:00", maxStudents: 12, room: "101-xona" },
 ];
 
 const SAMPLE_STUDENTS: Student[] = [
@@ -119,6 +138,7 @@ const SAMPLE_PAYMENTS: Payment[] = [
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<AppUser | null>(null);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -126,9 +146,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [attendances, setAttendances] = useState<Attendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
@@ -136,18 +154,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (raw) {
         const data = JSON.parse(raw);
         if (data.user) setUserState(data.user);
+        setTeachers(data.teachers ?? SAMPLE_TEACHERS);
         setStudents(data.students ?? SAMPLE_STUDENTS);
         setCourses(data.courses ?? SAMPLE_COURSES);
         setGroups(data.groups ?? SAMPLE_GROUPS);
         setPayments(data.payments ?? SAMPLE_PAYMENTS);
         setAttendances(data.attendances ?? []);
       } else {
+        setTeachers(SAMPLE_TEACHERS);
         setStudents(SAMPLE_STUDENTS);
         setCourses(SAMPLE_COURSES);
         setGroups(SAMPLE_GROUPS);
         setPayments(SAMPLE_PAYMENTS);
       }
     } catch {
+      setTeachers(SAMPLE_TEACHERS);
       setStudents(SAMPLE_STUDENTS);
       setCourses(SAMPLE_COURSES);
       setGroups(SAMPLE_GROUPS);
@@ -159,6 +180,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const persist = useCallback(async (updates: {
     user?: AppUser | null;
+    teachers?: Teacher[];
     students?: Student[];
     courses?: Course[];
     groups?: Group[];
@@ -177,118 +199,80 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persist({ user: u });
   }, [persist]);
 
+  const addTeacher = useCallback((t: Omit<Teacher, "id" | "joinedAt">) => {
+    const newT: Teacher = { ...t, id: genId(), joinedAt: new Date().toISOString().split("T")[0] };
+    setTeachers(prev => { const next = [...prev, newT]; persist({ teachers: next }); return next; });
+  }, [persist]);
+
+  const updateTeacher = useCallback((id: string, data: Partial<Teacher>) => {
+    setTeachers(prev => { const next = prev.map(t => t.id === id ? { ...t, ...data } : t); persist({ teachers: next }); return next; });
+  }, [persist]);
+
+  const deleteTeacher = useCallback((id: string) => {
+    setTeachers(prev => { const next = prev.filter(t => t.id !== id); persist({ teachers: next }); return next; });
+  }, [persist]);
+
   const addStudent = useCallback((s: Omit<Student, "id" | "enrolledAt">) => {
     const newS: Student = { ...s, id: genId(), enrolledAt: new Date().toISOString().split("T")[0] };
-    setStudents(prev => {
-      const next = [...prev, newS];
-      persist({ students: next });
-      return next;
-    });
+    setStudents(prev => { const next = [...prev, newS]; persist({ students: next }); return next; });
   }, [persist]);
 
   const updateStudent = useCallback((id: string, data: Partial<Student>) => {
-    setStudents(prev => {
-      const next = prev.map(s => s.id === id ? { ...s, ...data } : s);
-      persist({ students: next });
-      return next;
-    });
+    setStudents(prev => { const next = prev.map(s => s.id === id ? { ...s, ...data } : s); persist({ students: next }); return next; });
   }, [persist]);
 
   const deleteStudent = useCallback((id: string) => {
-    setStudents(prev => {
-      const next = prev.filter(s => s.id !== id);
-      persist({ students: next });
-      return next;
-    });
+    setStudents(prev => { const next = prev.filter(s => s.id !== id); persist({ students: next }); return next; });
   }, [persist]);
 
   const addCourse = useCallback((c: Omit<Course, "id">) => {
     const newC: Course = { ...c, id: genId() };
-    setCourses(prev => {
-      const next = [...prev, newC];
-      persist({ courses: next });
-      return next;
-    });
+    setCourses(prev => { const next = [...prev, newC]; persist({ courses: next }); return next; });
   }, [persist]);
 
   const updateCourse = useCallback((id: string, data: Partial<Course>) => {
-    setCourses(prev => {
-      const next = prev.map(c => c.id === id ? { ...c, ...data } : c);
-      persist({ courses: next });
-      return next;
-    });
+    setCourses(prev => { const next = prev.map(c => c.id === id ? { ...c, ...data } : c); persist({ courses: next }); return next; });
   }, [persist]);
 
   const deleteCourse = useCallback((id: string) => {
-    setCourses(prev => {
-      const next = prev.filter(c => c.id !== id);
-      persist({ courses: next });
-      return next;
-    });
+    setCourses(prev => { const next = prev.filter(c => c.id !== id); persist({ courses: next }); return next; });
   }, [persist]);
 
   const addGroup = useCallback((g: Omit<Group, "id">) => {
     const newG: Group = { ...g, id: genId() };
-    setGroups(prev => {
-      const next = [...prev, newG];
-      persist({ groups: next });
-      return next;
-    });
+    setGroups(prev => { const next = [...prev, newG]; persist({ groups: next }); return next; });
   }, [persist]);
 
   const updateGroup = useCallback((id: string, data: Partial<Group>) => {
-    setGroups(prev => {
-      const next = prev.map(g => g.id === id ? { ...g, ...data } : g);
-      persist({ groups: next });
-      return next;
-    });
+    setGroups(prev => { const next = prev.map(g => g.id === id ? { ...g, ...data } : g); persist({ groups: next }); return next; });
   }, [persist]);
 
   const deleteGroup = useCallback((id: string) => {
-    setGroups(prev => {
-      const next = prev.filter(g => g.id !== id);
-      persist({ groups: next });
-      return next;
-    });
+    setGroups(prev => { const next = prev.filter(g => g.id !== id); persist({ groups: next }); return next; });
   }, [persist]);
 
   const addPayment = useCallback((p: Omit<Payment, "id">) => {
     const newP: Payment = { ...p, id: genId() };
-    setPayments(prev => {
-      const next = [...prev, newP];
-      persist({ payments: next });
-      return next;
-    });
+    setPayments(prev => { const next = [...prev, newP]; persist({ payments: next }); return next; });
   }, [persist]);
 
   const updatePayment = useCallback((id: string, data: Partial<Payment>) => {
-    setPayments(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, ...data } : p);
-      persist({ payments: next });
-      return next;
-    });
+    setPayments(prev => { const next = prev.map(p => p.id === id ? { ...p, ...data } : p); persist({ payments: next }); return next; });
   }, [persist]);
 
   const addAttendance = useCallback((a: Omit<Attendance, "id">) => {
     const newA: Attendance = { ...a, id: genId() };
-    setAttendances(prev => {
-      const next = [...prev, newA];
-      persist({ attendances: next });
-      return next;
-    });
+    setAttendances(prev => { const next = [...prev, newA]; persist({ attendances: next }); return next; });
   }, [persist]);
 
   const updateAttendance = useCallback((id: string, data: Partial<Attendance>) => {
-    setAttendances(prev => {
-      const next = prev.map(a => a.id === id ? { ...a, ...data } : a);
-      persist({ attendances: next });
-      return next;
-    });
+    setAttendances(prev => { const next = prev.map(a => a.id === id ? { ...a, ...data } : a); persist({ attendances: next }); return next; });
   }, [persist]);
 
   return (
     <AppContext.Provider value={{
       user, setUser,
+      teachers, addTeacher, updateTeacher, deleteTeacher,
       students, addStudent, updateStudent, deleteStudent,
       courses, addCourse, updateCourse, deleteCourse,
       groups, addGroup, updateGroup, deleteGroup,

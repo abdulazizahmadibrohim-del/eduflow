@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "EduFlow – Kurs Boshqaruvi"
+version = "1.0.0"
+id = "artifacts/eduflow"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 19050
+
+[services.development]
+run = "pnpm --filter @workspace/eduflow run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/eduflow", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/eduflow", "run", "serve" ]
+
+[services.env]
+PORT = "19050"
+BASE_PATH = "/"

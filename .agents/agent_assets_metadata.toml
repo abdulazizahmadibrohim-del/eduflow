@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "B7bcO1obeYS7LrOZGJY83"
+uri = "file://artifacts/eduflow/assets/images/icon.png"
+type = "image"
+title = "generated_image"

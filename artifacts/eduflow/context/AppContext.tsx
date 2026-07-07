@@ -9,6 +9,7 @@ export interface AppUser {
   role: UserRole;
   centerName?: string;
   phone: string;
+  teacherId?: string;
 }
 
 export type SalaryType = "fixed" | "percentage";
@@ -19,8 +20,8 @@ export interface Teacher {
   phone: string;
   subject: string;
   salaryType: SalaryType;
-  salary?: number;       // agar salaryType === "fixed" bo'lsa — oylik summa (so'm)
-  salaryPercent?: number; // agar salaryType === "percentage" bo'lsa — foiz (0–100)
+  salary?: number;
+  salaryPercent?: number;
   status: "active" | "inactive";
   joinedAt: string;
 }
@@ -56,14 +57,26 @@ export interface Group {
   room?: string;
 }
 
+export interface PaymentTransaction {
+  id: string;
+  amount: number;
+  method: "cash" | "card";
+  receiptUri?: string;
+  paidAt: string;
+  note?: string;
+}
+
 export interface Payment {
   id: string;
   studentId: string;
   amount: number;
   month: string;
   paidAt?: string;
-  status: "paid" | "pending" | "overdue";
+  status: "paid" | "pending" | "overdue" | "partial";
   note?: string;
+  method?: "cash" | "card";
+  transactions?: PaymentTransaction[];
+  paidTotal?: number;
 }
 
 export interface Attendance {
@@ -72,6 +85,36 @@ export interface Attendance {
   groupId: string;
   date: string;
   status: "present" | "absent" | "late";
+}
+
+export type DiscountType = "group" | "individual" | "monthly" | "earlybird_10" | "earlybird_15" | "registration";
+
+export interface Discount {
+  id: string;
+  name: string;
+  type: DiscountType;
+  targetId?: string;
+  month?: string;
+  percent: number;
+  durationMonths?: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface DiscountRequest {
+  id: string;
+  teacherId: string;
+  targetType: "student" | "group";
+  targetId: string;
+  period: "monthly" | "unlimited";
+  month?: string;
+  percent: number;
+  description?: string;
+  status: "pending" | "approved" | "rejected";
+  approvedPercent?: number;
+  approvedDurationMonths?: number;
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 interface AppContextType {
@@ -94,17 +137,25 @@ interface AppContextType {
   updateGroup: (id: string, data: Partial<Group>) => void;
   deleteGroup: (id: string) => void;
   payments: Payment[];
-  addPayment: (p: Omit<Payment, "id">) => void;
+  addPayment: (p: Omit<Payment, "id">) => Payment;
   updatePayment: (id: string, data: Partial<Payment>) => void;
+  addTransaction: (paymentId: string, tx: Omit<PaymentTransaction, "id">) => void;
   attendances: Attendance[];
   addAttendance: (a: Omit<Attendance, "id">) => void;
   updateAttendance: (id: string, data: Partial<Attendance>) => void;
+  discounts: Discount[];
+  addDiscount: (d: Omit<Discount, "id" | "createdAt">) => void;
+  updateDiscount: (id: string, data: Partial<Discount>) => void;
+  deleteDiscount: (id: string) => void;
+  discountRequests: DiscountRequest[];
+  addDiscountRequest: (r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => void;
+  resolveDiscountRequest: (id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => void;
   isLoading: boolean;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
-const STORAGE_KEY = "eduflow_data_v2";
+const STORAGE_KEY = "eduflow_data_v3";
 
 function genId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -134,10 +185,16 @@ const SAMPLE_STUDENTS: Student[] = [
 ];
 
 const SAMPLE_PAYMENTS: Payment[] = [
-  { id: "p1", studentId: "s1", amount: 350000, month: "2026-07", paidAt: "2026-07-01", status: "paid" },
-  { id: "p2", studentId: "s2", amount: 450000, month: "2026-07", status: "pending" },
-  { id: "p3", studentId: "s3", amount: 350000, month: "2026-07", status: "overdue" },
-  { id: "p4", studentId: "s1", amount: 350000, month: "2026-06", paidAt: "2026-06-02", status: "paid" },
+  { id: "p1", studentId: "s1", amount: 350000, month: "2026-07", paidAt: "2026-07-01", status: "paid", method: "cash", transactions: [{ id: "tx1", amount: 350000, method: "cash", paidAt: "2026-07-01" }], paidTotal: 350000 },
+  { id: "p2", studentId: "s2", amount: 450000, month: "2026-07", status: "pending", paidTotal: 0 },
+  { id: "p3", studentId: "s3", amount: 350000, month: "2026-07", status: "overdue", paidTotal: 0 },
+  { id: "p4", studentId: "s1", amount: 350000, month: "2026-06", paidAt: "2026-06-02", status: "paid", method: "cash", transactions: [{ id: "tx2", amount: 350000, method: "cash", paidAt: "2026-06-02" }], paidTotal: 350000 },
+];
+
+const SAMPLE_DISCOUNTS: Discount[] = [
+  { id: "d1", name: "Erta to'lov (1–10 kun)", type: "earlybird_10", percent: 10, active: true, createdAt: "2026-01-01" },
+  { id: "d2", name: "Erta to'lov (11–15 kun)", type: "earlybird_15", percent: 5, active: true, createdAt: "2026-01-01" },
+  { id: "d3", name: "Ro'yxatdan o'tish chegirmasi", type: "registration", percent: 20, durationMonths: 1, active: true, createdAt: "2026-01-01" },
 ];
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -148,6 +205,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [attendances, setAttendances] = useState<Attendance[]>([]);
+  const [discounts, setDiscounts] = useState<Discount[]>([]);
+  const [discountRequests, setDiscountRequests] = useState<DiscountRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => { loadData(); }, []);
@@ -164,12 +223,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setGroups(data.groups ?? SAMPLE_GROUPS);
         setPayments(data.payments ?? SAMPLE_PAYMENTS);
         setAttendances(data.attendances ?? []);
+        setDiscounts(data.discounts ?? SAMPLE_DISCOUNTS);
+        setDiscountRequests(data.discountRequests ?? []);
       } else {
         setTeachers(SAMPLE_TEACHERS);
         setStudents(SAMPLE_STUDENTS);
         setCourses(SAMPLE_COURSES);
         setGroups(SAMPLE_GROUPS);
         setPayments(SAMPLE_PAYMENTS);
+        setDiscounts(SAMPLE_DISCOUNTS);
       }
     } catch {
       setTeachers(SAMPLE_TEACHERS);
@@ -177,6 +239,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setCourses(SAMPLE_COURSES);
       setGroups(SAMPLE_GROUPS);
       setPayments(SAMPLE_PAYMENTS);
+      setDiscounts(SAMPLE_DISCOUNTS);
     } finally {
       setIsLoading(false);
     }
@@ -190,6 +253,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     groups?: Group[];
     payments?: Payment[];
     attendances?: Attendance[];
+    discounts?: Discount[];
+    discountRequests?: DiscountRequest[];
   }) => {
     try {
       const current = await AsyncStorage.getItem(STORAGE_KEY);
@@ -255,13 +320,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setGroups(prev => { const next = prev.filter(g => g.id !== id); persist({ groups: next }); return next; });
   }, [persist]);
 
-  const addPayment = useCallback((p: Omit<Payment, "id">) => {
-    const newP: Payment = { ...p, id: genId() };
+  const addPayment = useCallback((p: Omit<Payment, "id">): Payment => {
+    const newP: Payment = { ...p, id: genId(), paidTotal: p.paidTotal ?? 0, transactions: p.transactions ?? [] };
     setPayments(prev => { const next = [...prev, newP]; persist({ payments: next }); return next; });
+    return newP;
   }, [persist]);
 
   const updatePayment = useCallback((id: string, data: Partial<Payment>) => {
     setPayments(prev => { const next = prev.map(p => p.id === id ? { ...p, ...data } : p); persist({ payments: next }); return next; });
+  }, [persist]);
+
+  const addTransaction = useCallback((paymentId: string, tx: Omit<PaymentTransaction, "id">) => {
+    const newTx: PaymentTransaction = { ...tx, id: genId() };
+    setPayments(prev => {
+      const next = prev.map(p => {
+        if (p.id !== paymentId) return p;
+        const txs = [...(p.transactions ?? []), newTx];
+        const paidTotal = txs.reduce((s, t) => s + t.amount, 0);
+        const status: Payment["status"] = paidTotal >= p.amount ? "paid" : paidTotal > 0 ? "partial" : p.status;
+        const paidAt = paidTotal >= p.amount ? newTx.paidAt : p.paidAt;
+        return { ...p, transactions: txs, paidTotal, status, paidAt };
+      });
+      persist({ payments: next });
+      return next;
+    });
   }, [persist]);
 
   const addAttendance = useCallback((a: Omit<Attendance, "id">) => {
@@ -273,6 +355,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAttendances(prev => { const next = prev.map(a => a.id === id ? { ...a, ...data } : a); persist({ attendances: next }); return next; });
   }, [persist]);
 
+  const addDiscount = useCallback((d: Omit<Discount, "id" | "createdAt">) => {
+    const newD: Discount = { ...d, id: genId(), createdAt: new Date().toISOString().split("T")[0] };
+    setDiscounts(prev => { const next = [...prev, newD]; persist({ discounts: next }); return next; });
+  }, [persist]);
+
+  const updateDiscount = useCallback((id: string, data: Partial<Discount>) => {
+    setDiscounts(prev => { const next = prev.map(d => d.id === id ? { ...d, ...data } : d); persist({ discounts: next }); return next; });
+  }, [persist]);
+
+  const deleteDiscount = useCallback((id: string) => {
+    setDiscounts(prev => { const next = prev.filter(d => d.id !== id); persist({ discounts: next }); return next; });
+  }, [persist]);
+
+  const addDiscountRequest = useCallback((r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => {
+    const newR: DiscountRequest = { ...r, id: genId(), status: "pending", createdAt: new Date().toISOString().split("T")[0] };
+    setDiscountRequests(prev => { const next = [...prev, newR]; persist({ discountRequests: next }); return next; });
+  }, [persist]);
+
+  const resolveDiscountRequest = useCallback((id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => {
+    setDiscountRequests(prev => {
+      const next = prev.map(r => r.id === id ? { ...r, ...resolution, resolvedAt: new Date().toISOString().split("T")[0] } : r);
+      persist({ discountRequests: next });
+      return next;
+    });
+  }, [persist]);
+
   return (
     <AppContext.Provider value={{
       user, setUser,
@@ -280,8 +388,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       students, addStudent, updateStudent, deleteStudent,
       courses, addCourse, updateCourse, deleteCourse,
       groups, addGroup, updateGroup, deleteGroup,
-      payments, addPayment, updatePayment,
+      payments, addPayment, updatePayment, addTransaction,
       attendances, addAttendance, updateAttendance,
+      discounts, addDiscount, updateDiscount, deleteDiscount,
+      discountRequests, addDiscountRequest, resolveDiscountRequest,
       isLoading,
     }}>
       {children}

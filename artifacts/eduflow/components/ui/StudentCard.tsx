@@ -9,7 +9,7 @@ interface StudentCardProps {
   student: Student;
   course?: Course;
   group?: Group;
-  paymentStatus?: "paid" | "pending" | "overdue";
+  paymentStatus?: "paid" | "pending" | "overdue" | "partial";
   onPress: () => void;
 }
 
@@ -17,6 +17,7 @@ const statusConfig = {
   paid: { color: "#10B981", label: "To'langan", icon: "checkmark-circle" as const },
   pending: { color: "#F59E0B", label: "Kutilmoqda", icon: "time" as const },
   overdue: { color: "#EF4444", label: "Muddati o'tgan", icon: "warning" as const },
+  partial: { color: "#0EA5E9", label: "Qisman", icon: "timer-outline" as const },
 };
 
 export function StudentCard({ student, course, group, paymentStatus, onPress }: StudentCardProps) {

@@ -1,0 +1,1 @@
+- [EduFlow Architecture](eduflow-arch.md) — Expo offline-first app; key decisions on types, storage key, and role system.

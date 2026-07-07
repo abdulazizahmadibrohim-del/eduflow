@@ -2,51 +2,32 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
-  Alert,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useColorScheme,
+  Alert, Platform, ScrollView, StyleSheet, Text,
+  TouchableOpacity, View, useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 import { FormField } from "@/components/ui/FormField";
 import { ModalSheet } from "@/components/ui/ModalSheet";
-import { useApp, type SalaryType, type Teacher, type UserRole } from "@/context/AppContext";
+import {
+  useApp, type Discount, type DiscountRequest, type DiscountType,
+  type SalaryType, type Teacher, type UserRole,
+} from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 
 const SUBJECT_COLORS: Record<string, string> = {
-  "Matematika": "#1E3A8A",
-  "Ingliz tili": "#7C3AED",
-  "Dasturlash": "#10B981",
-  "Fizika": "#F59E0B",
-  "Kimyo": "#EF4444",
-  "Tarix": "#6B7280",
+  "Matematika": "#1E3A8A", "Ingliz tili": "#7C3AED", "Dasturlash": "#10B981",
+  "Fizika": "#F59E0B", "Kimyo": "#EF4444", "Tarix": "#6B7280",
 };
-
-function subjectColor(subject: string) {
-  return SUBJECT_COLORS[subject] ?? "#1E3A8A";
-}
-
-function initials(name: string) {
-  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-}
+function subjectColor(subject: string) { return SUBJECT_COLORS[subject] ?? "#1E3A8A"; }
+function initials(name: string) { return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase(); }
 
 const EMPTY_FORM = {
-  name: "",
-  phone: "",
-  subject: "",
+  name: "", phone: "", subject: "",
   salaryType: "fixed" as SalaryType,
-  salary: "",
-  salaryPercent: "",
+  salary: "", salaryPercent: "",
   status: "active" as "active" | "inactive",
 };
 
-// O'qituvchi foizli maoshi: uning GURUHLARIDAGI o'quvchilar to'lagan summadan hisoblash
-// Zanjir: o'qituvchi → guruhlar → o'quvchilar → to'lovlar
 function calcPercentEarnings(
   teacher: Teacher,
   payments: ReturnType<typeof useApp>["payments"],
@@ -55,117 +36,194 @@ function calcPercentEarnings(
   currentMonth: string
 ): number {
   if (teacher.salaryType !== "percentage" || !teacher.salaryPercent) return 0;
-  // 1) shu o'qituvchiga tegishli guruhlar
-  const teacherGroupIds = groups.filter((g) => g.teacherId === teacher.id).map((g) => g.id);
-  // 2) shu guruhlardagi o'quvchilar
-  const teacherStudentIds = students.filter((s) => teacherGroupIds.includes(s.groupId)).map((s) => s.id);
-  // 3) shu oy to'langan summalar
+  const teacherGroupIds = groups.filter(g => g.teacherId === teacher.id).map(g => g.id);
+  const teacherStudentIds = students.filter(s => teacherGroupIds.includes(s.groupId)).map(s => s.id);
   const paid = payments
-    .filter((p) => teacherStudentIds.includes(p.studentId) && p.status === "paid" && p.month === currentMonth)
+    .filter(p => teacherStudentIds.includes(p.studentId) && p.status === "paid" && p.month === currentMonth)
     .reduce((sum, p) => sum + p.amount, 0);
   return Math.round((paid * teacher.salaryPercent) / 100);
 }
+
+const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
+  group: "Guruh chegirmasi",
+  individual: "Individual chegirma",
+  monthly: "Oylik chegirma",
+  earlybird_10: "Erta to'lov (1–10 kun)",
+  earlybird_15: "Erta to'lov (11–15 kun)",
+  registration: "Ro'yxatdan o'tish",
+};
+
+const DISCOUNT_TYPE_ICONS: Record<DiscountType, any> = {
+  group: "people-outline",
+  individual: "person-outline",
+  monthly: "calendar-outline",
+  earlybird_10: "flash-outline",
+  earlybird_15: "time-outline",
+  registration: "star-outline",
+};
 
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
   const colorScheme = useColorScheme();
-  const { user, setUser, students, courses, groups, payments, teachers, addTeacher, updateTeacher, deleteTeacher } = useApp();
+  const {
+    user, setUser,
+    students, courses, groups, payments, teachers,
+    addTeacher, updateTeacher, deleteTeacher,
+    discounts, addDiscount, updateDiscount, deleteDiscount,
+    discountRequests, resolveDiscountRequest,
+  } = useApp();
 
   const isAdmin = (user?.role ?? "admin") === "admin";
-  const currentMonth = new Date().toISOString().slice(0, 7); // "2026-07"
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const pendingRequests = discountRequests.filter(r => r.status === "pending");
 
-  // Profile modal
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", phone: user?.phone ?? "", centerName: user?.centerName ?? "" });
 
-  // Teacher modal
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [editingDiscount, setEditingDiscount] = useState<Discount | null>(null);
+  const [discountForm, setDiscountForm] = useState({
+    name: "", type: "earlybird_10" as DiscountType, percent: "10",
+    durationMonths: "", active: true,
+  });
+
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<DiscountRequest | null>(null);
+  const [resolveForm, setResolveForm] = useState({ approvedPercent: "", approvedDurationMonths: "" });
 
   const openAdd = () => {
     setEditingTeacher(null);
     setForm(EMPTY_FORM);
     setShowTeacherModal(true);
   };
-
   const openEdit = (t: Teacher) => {
     setEditingTeacher(t);
-    setForm({
-      name: t.name,
-      phone: t.phone,
-      subject: t.subject,
-      salaryType: t.salaryType,
-      salary: t.salary?.toString() ?? "",
-      salaryPercent: t.salaryPercent?.toString() ?? "",
-      status: t.status,
-    });
+    setForm({ name: t.name, phone: t.phone, subject: t.subject, salaryType: t.salaryType, salary: t.salary?.toString() ?? "", salaryPercent: t.salaryPercent?.toString() ?? "", status: t.status });
     setShowTeacherModal(true);
   };
-
   const saveTeacher = () => {
     if (!form.name.trim() || !form.subject.trim()) return;
     const base = {
-      name: form.name.trim(),
-      phone: form.phone.trim(),
-      subject: form.subject.trim(),
+      name: form.name.trim(), phone: form.phone.trim(), subject: form.subject.trim(),
       salaryType: form.salaryType,
       salary: form.salaryType === "fixed" && form.salary ? parseInt(form.salary.replace(/\D/g, ""), 10) : undefined,
       salaryPercent: form.salaryType === "percentage" && form.salaryPercent ? parseFloat(form.salaryPercent) : undefined,
       status: form.status,
     };
-    if (editingTeacher) {
-      updateTeacher(editingTeacher.id, base);
-    } else {
-      addTeacher(base);
-    }
+    if (editingTeacher) updateTeacher(editingTeacher.id, base);
+    else addTeacher(base);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowTeacherModal(false);
   };
-
   const confirmDelete = (t: Teacher) => {
     Alert.alert("O'chirishni tasdiqlang", `${t.name} o'qituvchini o'chirmoqchimisiz?`, [
       { text: "Bekor qilish", style: "cancel" },
-      {
-        text: "O'chirish",
-        style: "destructive",
-        onPress: () => { deleteTeacher(t.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); },
-      },
+      { text: "O'chirish", style: "destructive", onPress: () => { deleteTeacher(t.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } },
     ]);
+  };
+
+  const openAddDiscount = () => {
+    setEditingDiscount(null);
+    setDiscountForm({ name: DISCOUNT_TYPE_LABELS.earlybird_10, type: "earlybird_10", percent: "10", durationMonths: "", active: true });
+    setShowDiscountModal(true);
+  };
+  const openEditDiscount = (d: Discount) => {
+    setEditingDiscount(d);
+    setDiscountForm({ name: d.name, type: d.type, percent: d.percent.toString(), durationMonths: d.durationMonths?.toString() ?? "", active: d.active });
+    setShowDiscountModal(true);
+  };
+  const saveDiscount = () => {
+    if (!discountForm.name || !discountForm.percent) return;
+    const data = {
+      name: discountForm.name,
+      type: discountForm.type,
+      percent: Number(discountForm.percent),
+      durationMonths: discountForm.durationMonths ? Number(discountForm.durationMonths) : undefined,
+      active: discountForm.active,
+    };
+    if (editingDiscount) updateDiscount(editingDiscount.id, data);
+    else addDiscount(data);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowDiscountModal(false);
+  };
+
+  const openRequestReview = (r: DiscountRequest) => {
+    setSelectedRequest(r);
+    setResolveForm({ approvedPercent: r.percent.toString(), approvedDurationMonths: r.approvedDurationMonths?.toString() ?? "" });
+    setShowRequestModal(true);
+  };
+  const approveRequest = () => {
+    if (!selectedRequest) return;
+    resolveDiscountRequest(selectedRequest.id, {
+      status: "approved",
+      approvedPercent: resolveForm.approvedPercent ? Number(resolveForm.approvedPercent) : selectedRequest.percent,
+      approvedDurationMonths: resolveForm.approvedDurationMonths ? Number(resolveForm.approvedDurationMonths) : undefined,
+    });
+    addDiscount({
+      name: `${selectedRequest.targetType === "student" ? "O'quvchi" : "Guruh"} chegirmasi`,
+      type: selectedRequest.targetType === "student" ? "individual" : "group",
+      targetId: selectedRequest.targetId,
+      percent: resolveForm.approvedPercent ? Number(resolveForm.approvedPercent) : selectedRequest.percent,
+      month: selectedRequest.month,
+      durationMonths: resolveForm.approvedDurationMonths ? Number(resolveForm.approvedDurationMonths) : undefined,
+      active: true,
+    });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowRequestModal(false);
+  };
+  const rejectRequest = () => {
+    if (!selectedRequest) return;
+    resolveDiscountRequest(selectedRequest.id, { status: "rejected" });
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    setShowRequestModal(false);
   };
 
   const openProfile = () => {
     setProfileForm({ name: user?.name ?? "", phone: user?.phone ?? "", centerName: user?.centerName ?? "" });
     setShowProfileModal(true);
   };
-
   const saveProfile = () => {
-    setUser({ id: user?.id ?? "u1", role: user?.role ?? "admin", ...profileForm });
+    setUser({ id: user?.id ?? "u1", role: user?.role ?? "admin", teacherId: user?.teacherId, ...profileForm });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowProfileModal(false);
   };
 
+  function salaryLabel(t: Teacher): string {
+    if (t.salaryType === "fixed") return t.salary ? `Oylik: ${t.salary.toLocaleString()} so'm` : "Oylik belgilanmagan";
+    if (!t.salaryPercent) return "Foiz belgilanmagan";
+    const earned = calcPercentEarnings(t, payments, students, groups, currentMonth);
+    return `Bu oy: ${earned.toLocaleString()} so'm`;
+  }
+
+  const adjustPercent = (teacherId: string, currentPercent: number, delta: number) => {
+    const next = Math.max(1, Math.min(100, currentPercent + delta));
+    updateTeacher(teacherId, { salaryPercent: next });
+    Haptics.selectionAsync();
+  };
+
+  const getRequestTargetName = (r: DiscountRequest): string => {
+    if (r.targetType === "student") {
+      const s = students.find(s => s.id === r.targetId);
+      return s?.name ?? "Noma'lum o'quvchi";
+    }
+    const g = groups.find(g => g.id === r.targetId);
+    return g?.name ?? "Noma'lum guruh";
+  };
+  const getTeacherName = (teacherId: string): string => teachers.find(t => t.id === teacherId)?.name ?? "Noma'lum";
+
   const stats = {
-    teachers: teachers.length,
-    students: students.length,
-    courses: courses.length,
-    groups: groups.length,
-    revenue: payments.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0),
+    teachers: teachers.length, students: students.length,
+    courses: courses.length, groups: groups.length,
+    revenue: payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0),
   };
 
   const topPadding = isWeb ? 67 : insets.top;
-
-  // Maosh ko'rsatish matni
-  function salaryLabel(t: Teacher): string {
-    if (t.salaryType === "fixed") {
-      return t.salary ? `Oylik: ${t.salary.toLocaleString()} so'm` : "Oylik belgilanmagan";
-    }
-    if (!t.salaryPercent) return "Foiz belgilanmagan";
-    const earned = calcPercentEarnings(t, payments, students, groups, currentMonth);
-    return `${t.salaryPercent}% · Bu oy: ${earned.toLocaleString()} so'm`;
-  }
 
   return (
     <>
@@ -197,7 +255,7 @@ export default function SettingsScreen() {
               { label: "O'quvchilar", value: stats.students, icon: "people-outline" as const, color: colors.primary },
               { label: "Kurslar", value: stats.courses, icon: "book-outline" as const, color: "#F59E0B" },
               { label: "Guruhlar", value: stats.groups, icon: "grid-outline" as const, color: "#10B981" },
-            ].map((s) => (
+            ].map(s => (
               <View key={s.label} style={[styles.statItem, { borderColor: colors.border }]}>
                 <Ionicons name={s.icon} size={20} color={s.color} />
                 <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "Inter_700Bold" }]}>{s.value}</Text>
@@ -217,7 +275,7 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>Rol</Text>
           <View style={styles.roleRow}>
-            {(["admin", "teacher"] as UserRole[]).map((r) => (
+            {(["admin", "teacher"] as UserRole[]).map(r => (
               <TouchableOpacity
                 key={r}
                 style={[styles.roleChip, { backgroundColor: (user?.role ?? "admin") === r ? colors.primary : colors.muted }]}
@@ -230,9 +288,143 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             ))}
           </View>
+          {/* Teacher selector when role === teacher */}
+          {(user?.role === "teacher") && teachers.length > 0 && (
+            <View style={styles.teacherSelectorSection}>
+              <Text style={[styles.teacherSelectorLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                Siz qaysi o'qituvchisiz?
+              </Text>
+              <View style={styles.teacherSelectorList}>
+                {teachers.map(t => {
+                  const isSelected = user?.teacherId === t.id;
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[styles.teacherSelectorChip, {
+                        backgroundColor: isSelected ? colors.secondary : colors.muted,
+                        borderColor: isSelected ? colors.secondary : colors.border,
+                      }]}
+                      onPress={() => setUser({ ...(user ?? { id: "u1", name: "", phone: "", role: "teacher" }), teacherId: t.id })}
+                    >
+                      <Text style={[styles.teacherSelectorText, {
+                        color: isSelected ? "#FFFFFF" : colors.foreground,
+                        fontFamily: isSelected ? "Inter_600SemiBold" : "Inter_400Regular",
+                      }]}>
+                        {t.name}
+                      </Text>
+                      {isSelected && <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
-        {/* Teachers (Admin only) */}
+        {/* Discount Requests (admin only, pending first) */}
+        {isAdmin && discountRequests.length > 0 && (
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold", padding: 0 }]}>
+                So'rovnomalar
+              </Text>
+              {pendingRequests.length > 0 && (
+                <View style={[styles.pendingBadge, { backgroundColor: colors.secondary }]}>
+                  <Text style={[styles.pendingBadgeText, { fontFamily: "Inter_700Bold" }]}>{pendingRequests.length}</Text>
+                </View>
+              )}
+            </View>
+            {discountRequests
+              .sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1))
+              .slice(0, 5)
+              .map((r, i) => (
+                <TouchableOpacity
+                  key={r.id}
+                  style={[styles.requestRow, { borderTopWidth: i === 0 ? 0 : 0.5, borderTopColor: colors.border }]}
+                  onPress={() => r.status === "pending" ? openRequestReview(r) : undefined}
+                  activeOpacity={r.status === "pending" ? 0.85 : 1}
+                >
+                  <View style={[styles.requestStatusDot, {
+                    backgroundColor: r.status === "pending" ? colors.secondary : r.status === "approved" ? "#10B981" : "#EF4444",
+                  }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.requestTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+                      {getTeacherName(r.teacherId)} → {getRequestTargetName(r)}
+                    </Text>
+                    <Text style={[styles.requestSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                      {r.percent}% · {r.period === "monthly" ? `${r.month} oyiga` : "Cheksiz"}
+                      {r.description ? ` · "${r.description}"` : ""}
+                    </Text>
+                    {r.status !== "pending" && (
+                      <Text style={[styles.requestResolved, {
+                        color: r.status === "approved" ? "#10B981" : "#EF4444",
+                        fontFamily: "Inter_500Medium",
+                      }]}>
+                        {r.status === "approved"
+                          ? `Tasdiqlandi${r.approvedPercent && r.approvedPercent !== r.percent ? ` (${r.approvedPercent}%)` : ""}`
+                          : "Rad etildi"}
+                      </Text>
+                    )}
+                  </View>
+                  {r.status === "pending" && <Ionicons name="chevron-forward" size={16} color={colors.secondary} />}
+                </TouchableOpacity>
+              ))}
+          </View>
+        )}
+
+        {/* Discounts (admin only) */}
+        {isAdmin && (
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold", padding: 0 }]}>
+                Chegirmalar
+              </Text>
+              <TouchableOpacity style={[styles.addBtn, { backgroundColor: "#10B981" }]} onPress={openAddDiscount}>
+                <Ionicons name="add" size={18} color="#FFFFFF" />
+                <Text style={[styles.addBtnText, { fontFamily: "Inter_600SemiBold" }]}>Qo'shish</Text>
+              </TouchableOpacity>
+            </View>
+            {discounts.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                  Chegirmalar yo'q
+                </Text>
+              </View>
+            ) : (
+              discounts.map((d, i) => (
+                <TouchableOpacity
+                  key={d.id}
+                  style={[styles.discountRow, { borderTopWidth: i === 0 ? 0 : 0.5, borderTopColor: colors.border }]}
+                  onPress={() => openEditDiscount(d)}
+                  activeOpacity={0.85}
+                >
+                  <View style={[styles.discountIconBox, { backgroundColor: (d.active ? "#10B981" : colors.mutedForeground) + "15" }]}>
+                    <Ionicons name={DISCOUNT_TYPE_ICONS[d.type]} size={18} color={d.active ? "#10B981" : colors.mutedForeground} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.discountName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>{d.name}</Text>
+                    <Text style={[styles.discountSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                      {d.percent}%{d.durationMonths ? ` · ${d.durationMonths} oy` : " · Cheksiz"}
+                    </Text>
+                  </View>
+                  <View style={styles.discountRight}>
+                    <TouchableOpacity
+                      style={[styles.toggleBtn, { backgroundColor: d.active ? "#10B98120" : colors.muted }]}
+                      onPress={() => { updateDiscount(d.id, { active: !d.active }); Haptics.selectionAsync(); }}
+                    >
+                      <Text style={[styles.toggleText, { color: d.active ? "#10B981" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                        {d.active ? "Faol" : "Nofaol"}
+                      </Text>
+                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* Teachers (admin only) */}
         {isAdmin && (
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
@@ -264,11 +456,9 @@ export default function SettingsScreen() {
                       <View style={[styles.statusDot, { backgroundColor: t.status === "active" ? "#10B981" : "#EF4444" }]} />
                     </View>
                     <Text style={[styles.teacherSubject, { color: subjectColor(t.subject), fontFamily: "Inter_500Medium" }]}>{t.subject}</Text>
-                    {t.phone ? (
-                      <Text style={[styles.teacherMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{t.phone}</Text>
-                    ) : null}
+                    {t.phone ? <Text style={[styles.teacherMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{t.phone}</Text> : null}
 
-                    {/* Maosh ko'rsatish */}
+                    {/* Maosh badge */}
                     <View style={[styles.salaryBadge, {
                       backgroundColor: t.salaryType === "percentage" ? colors.secondary + "15" : colors.primary + "12",
                     }]}>
@@ -277,12 +467,32 @@ export default function SettingsScreen() {
                         size={11}
                         color={t.salaryType === "percentage" ? colors.secondary : colors.primary}
                       />
-                      <Text style={[styles.salaryBadgeText, {
-                        color: t.salaryType === "percentage" ? colors.secondary : colors.primary,
-                        fontFamily: "Inter_500Medium",
-                      }]}>
-                        {salaryLabel(t)}
-                      </Text>
+                      {t.salaryType === "percentage" ? (
+                        <View style={styles.percentStepper}>
+                          <TouchableOpacity
+                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, -1)}
+                            style={[styles.stepperBtn, { backgroundColor: colors.secondary + "20" }]}
+                          >
+                            <Text style={[styles.stepperIcon, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>−</Text>
+                          </TouchableOpacity>
+                          <Text style={[styles.percentValue, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>
+                            {t.salaryPercent ?? 0}%
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, +1)}
+                            style={[styles.stepperBtn, { backgroundColor: colors.secondary + "20" }]}
+                          >
+                            <Text style={[styles.stepperIcon, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>+</Text>
+                          </TouchableOpacity>
+                          <Text style={[styles.salaryBadgeText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
+                            · {salaryLabel(t)}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={[styles.salaryBadgeText, { color: colors.primary, fontFamily: "Inter_500Medium" }]}>
+                          {salaryLabel(t)}
+                        </Text>
+                      )}
                     </View>
                   </View>
                   <View style={styles.teacherActions}>
@@ -303,7 +513,7 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>Dastur haqida</Text>
           {[
-            { label: "Versiya", value: "1.0.0", icon: "information-circle-outline" as const, color: colors.primary },
+            { label: "Versiya", value: "2.0.0", icon: "information-circle-outline" as const, color: colors.primary },
             { label: "Platform", value: Platform.OS === "ios" ? "iOS" : Platform.OS === "android" ? "Android" : "Web", icon: "phone-portrait-outline" as const, color: colors.secondary },
             { label: "Mavzu", value: colorScheme === "dark" ? "Qorong'u" : "Yorug'", icon: "color-palette-outline" as const, color: "#10B981" },
           ].map((item, i, arr) => (
@@ -320,120 +530,74 @@ export default function SettingsScreen() {
 
       {/* Profile Modal */}
       <ModalSheet visible={showProfileModal} onClose={() => setShowProfileModal(false)} title="Profilni tahrirlash">
-        <FormField label="To'liq ism" value={profileForm.name} onChangeText={(v) => setProfileForm((p) => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
-        <FormField label="Telefon" value={profileForm.phone} onChangeText={(v) => setProfileForm((p) => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
-        <FormField label="O'quv markaz nomi" value={profileForm.centerName} onChangeText={(v) => setProfileForm((p) => ({ ...p, centerName: v }))} placeholder="masalan: Najot Ta'lim" />
+        <FormField label="To'liq ism" value={profileForm.name} onChangeText={v => setProfileForm(p => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
+        <FormField label="Telefon" value={profileForm.phone} onChangeText={v => setProfileForm(p => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
+        <FormField label="O'quv markaz nomi" value={profileForm.centerName} onChangeText={v => setProfileForm(p => ({ ...p, centerName: v }))} placeholder="masalan: Najot Ta'lim" />
         <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={saveProfile} activeOpacity={0.85}>
           <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>Saqlash</Text>
         </TouchableOpacity>
       </ModalSheet>
 
       {/* Teacher Modal */}
-      <ModalSheet
-        visible={showTeacherModal}
-        onClose={() => setShowTeacherModal(false)}
-        title={editingTeacher ? "O'qituvchini tahrirlash" : "O'qituvchi qo'shish"}
-      >
-        <FormField label="To'liq ism *" value={form.name} onChangeText={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
-        <FormField label="Fan / Yo'nalish *" value={form.subject} onChangeText={(v) => setForm((p) => ({ ...p, subject: v }))} placeholder="masalan: Matematika" autoCapitalize="words" />
-        <FormField label="Telefon raqami" value={form.phone} onChangeText={(v) => setForm((p) => ({ ...p, phone: v }))} placeholder="+998 90 000 00 00" keyboardType="phone-pad" />
+      <ModalSheet visible={showTeacherModal} onClose={() => setShowTeacherModal(false)} title={editingTeacher ? "O'qituvchini tahrirlash" : "O'qituvchi qo'shish"}>
+        <FormField label="To'liq ism *" value={form.name} onChangeText={v => setForm(p => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
+        <FormField label="Fan / Yo'nalish *" value={form.subject} onChangeText={v => setForm(p => ({ ...p, subject: v }))} placeholder="masalan: Matematika" autoCapitalize="words" />
+        <FormField label="Telefon raqami" value={form.phone} onChangeText={v => setForm(p => ({ ...p, phone: v }))} placeholder="+998 90 000 00 00" keyboardType="phone-pad" />
 
-        {/* Maosh turi tanlash */}
         <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Maosh turi</Text>
         <View style={styles.segmentRow}>
           <TouchableOpacity
-            style={[
-              styles.segment,
-              styles.segmentLeft,
-              {
-                backgroundColor: form.salaryType === "fixed" ? colors.primary : colors.muted,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => setForm((p) => ({ ...p, salaryType: "fixed" }))}
+            style={[styles.segment, styles.segmentLeft, { backgroundColor: form.salaryType === "fixed" ? colors.primary : colors.muted, borderColor: colors.border }]}
+            onPress={() => setForm(p => ({ ...p, salaryType: "fixed" }))}
           >
             <Ionicons name="cash-outline" size={16} color={form.salaryType === "fixed" ? "#FFFFFF" : colors.mutedForeground} />
-            <Text style={[styles.segmentText, { color: form.salaryType === "fixed" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
-              O'zgarmas
-            </Text>
-            <Text style={[styles.segmentSub, { color: form.salaryType === "fixed" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-              Oylik summa
-            </Text>
+            <Text style={[styles.segmentText, { color: form.salaryType === "fixed" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>O'zgarmas</Text>
+            <Text style={[styles.segmentSub, { color: form.salaryType === "fixed" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>Oylik summa</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.segment,
-              styles.segmentRight,
-              {
-                backgroundColor: form.salaryType === "percentage" ? colors.secondary : colors.muted,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => setForm((p) => ({ ...p, salaryType: "percentage" }))}
+            style={[styles.segment, styles.segmentRight, { backgroundColor: form.salaryType === "percentage" ? colors.secondary : colors.muted, borderColor: colors.border }]}
+            onPress={() => setForm(p => ({ ...p, salaryType: "percentage" }))}
           >
             <Ionicons name="pie-chart-outline" size={16} color={form.salaryType === "percentage" ? "#FFFFFF" : colors.mutedForeground} />
-            <Text style={[styles.segmentText, { color: form.salaryType === "percentage" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
-              Foizli
-            </Text>
-            <Text style={[styles.segmentSub, { color: form.salaryType === "percentage" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-              To'lovdan %
-            </Text>
+            <Text style={[styles.segmentText, { color: form.salaryType === "percentage" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>Foizli</Text>
+            <Text style={[styles.segmentSub, { color: form.salaryType === "percentage" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>To'lovdan %</Text>
           </TouchableOpacity>
         </View>
 
-        {/* O'zgarmas summa */}
         {form.salaryType === "fixed" && (
-          <FormField
-            label="Oylik maosh"
-            value={form.salary}
-            onChangeText={(v) => setForm((p) => ({ ...p, salary: v }))}
-            placeholder="masalan: 2000000"
-            keyboardType="numeric"
-            suffix="so'm"
-          />
+          <FormField label="Oylik maosh" value={form.salary} onChangeText={v => setForm(p => ({ ...p, salary: v }))} placeholder="masalan: 2000000" keyboardType="numeric" suffix="so'm" />
         )}
-
-        {/* Foizli maosh */}
         {form.salaryType === "percentage" && (
           <>
             <FormField
               label="O'quvchi to'lovidan foiz"
               value={form.salaryPercent}
-              onChangeText={(v) => {
-                const n = parseFloat(v);
-                if (v === "" || (n >= 0 && n <= 100)) setForm((p) => ({ ...p, salaryPercent: v }));
-              }}
+              onChangeText={v => { const n = parseFloat(v); if (v === "" || (n >= 0 && n <= 100)) setForm(p => ({ ...p, salaryPercent: v })); }}
               placeholder="masalan: 40"
               keyboardType="numeric"
               suffix="%"
             />
-            {/* Misol hisob */}
             {form.salaryPercent ? (
               <View style={[styles.exampleBox, { backgroundColor: colors.secondary + "12", borderColor: colors.secondary + "30" }]}>
                 <Ionicons name="calculator-outline" size={16} color={colors.secondary} />
                 <Text style={[styles.exampleText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
                   Misol: O'quvchi 400,000 so'm to'lasa → o'qituvchi{" "}
                   <Text style={{ fontFamily: "Inter_600SemiBold" }}>
-                    {form.salaryPercent
-                      ? Math.round((400000 * parseFloat(form.salaryPercent || "0")) / 100).toLocaleString()
-                      : "0"}{" "}
-                    so'm
-                  </Text>{" "}
-                  oladi
+                    {Math.round((400000 * parseFloat(form.salaryPercent || "0")) / 100).toLocaleString()} so'm
+                  </Text>{" "}oladi
                 </Text>
               </View>
             ) : null}
           </>
         )}
 
-        {/* Holat */}
         <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 4 }]}>Holat</Text>
         <View style={[styles.roleRow, { marginBottom: 20 }]}>
-          {(["active", "inactive"] as const).map((s) => (
+          {(["active", "inactive"] as const).map(s => (
             <TouchableOpacity
               key={s}
               style={[styles.roleChip, { backgroundColor: form.status === s ? (s === "active" ? "#10B981" : "#EF4444") : colors.muted }]}
-              onPress={() => setForm((p) => ({ ...p, status: s }))}
+              onPress={() => setForm(p => ({ ...p, status: s }))}
             >
               <Ionicons name={s === "active" ? "checkmark-circle" : "close-circle"} size={16} color={form.status === s ? "#FFFFFF" : colors.mutedForeground} />
               <Text style={[styles.roleText, { color: form.status === s ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
@@ -449,10 +613,150 @@ export default function SettingsScreen() {
           activeOpacity={0.85}
           disabled={!form.name.trim() || !form.subject.trim()}
         >
-          <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>
-            {editingTeacher ? "Saqlash" : "Qo'shish"}
-          </Text>
+          <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>{editingTeacher ? "Saqlash" : "Qo'shish"}</Text>
         </TouchableOpacity>
+      </ModalSheet>
+
+      {/* Discount Modal */}
+      <ModalSheet visible={showDiscountModal} onClose={() => setShowDiscountModal(false)} title={editingDiscount ? "Chegirmani tahrirlash" : "Yangi chegirma"}>
+        <FormField label="Chegirma nomi *" value={discountForm.name} onChangeText={v => setDiscountForm(p => ({ ...p, name: v }))} placeholder="masalan: Erta to'lov chegirmasi" />
+
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Turi</Text>
+        <View style={styles.discountTypeGrid}>
+          {(Object.keys(DISCOUNT_TYPE_LABELS) as DiscountType[]).map(type => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.typeChip, {
+                backgroundColor: discountForm.type === type ? "#10B981" : colors.muted,
+                borderColor: discountForm.type === type ? "#10B981" : colors.border,
+              }]}
+              onPress={() => setDiscountForm(p => ({ ...p, type, name: p.name || DISCOUNT_TYPE_LABELS[type] }))}
+            >
+              <Ionicons name={DISCOUNT_TYPE_ICONS[type]} size={14} color={discountForm.type === type ? "#FFFFFF" : colors.mutedForeground} />
+              <Text style={[styles.typeChipText, { color: discountForm.type === type ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                {DISCOUNT_TYPE_LABELS[type]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <FormField label="Chegirma foizi (%) *" value={discountForm.percent} onChangeText={v => setDiscountForm(p => ({ ...p, percent: v }))} placeholder="10" keyboardType="numeric" suffix="%" />
+        <FormField label="Davomiylik (oy) — bo'sh = cheksiz" value={discountForm.durationMonths} onChangeText={v => setDiscountForm(p => ({ ...p, durationMonths: v }))} placeholder="1" keyboardType="numeric" />
+
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Holat</Text>
+        <View style={[styles.roleRow, { marginBottom: 20 }]}>
+          {([true, false] as const).map(active => (
+            <TouchableOpacity
+              key={String(active)}
+              style={[styles.roleChip, { backgroundColor: discountForm.active === active ? (active ? "#10B981" : "#EF4444") : colors.muted }]}
+              onPress={() => setDiscountForm(p => ({ ...p, active }))}
+            >
+              <Ionicons name={active ? "checkmark-circle" : "close-circle"} size={16} color={discountForm.active === active ? "#FFFFFF" : colors.mutedForeground} />
+              <Text style={[styles.roleText, { color: discountForm.active === active ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                {active ? "Faol" : "Nofaol"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.saveBtn, { backgroundColor: !discountForm.name || !discountForm.percent ? colors.muted : "#10B981" }]}
+          onPress={saveDiscount}
+          disabled={!discountForm.name || !discountForm.percent}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>{editingDiscount ? "Saqlash" : "Qo'shish"}</Text>
+        </TouchableOpacity>
+        {editingDiscount && (
+          <TouchableOpacity
+            style={[styles.deleteBtn, { borderColor: colors.destructive }]}
+            onPress={() => { deleteDiscount(editingDiscount.id); setShowDiscountModal(false); }}
+          >
+            <Text style={[styles.deleteBtnText, { color: colors.destructive, fontFamily: "Inter_500Medium" }]}>O'chirish</Text>
+          </TouchableOpacity>
+        )}
+      </ModalSheet>
+
+      {/* Discount Request Review Modal */}
+      <ModalSheet visible={showRequestModal} onClose={() => setShowRequestModal(false)} title="So'rovnomani ko'rib chiqish">
+        {selectedRequest && (
+          <>
+            <View style={[styles.requestDetailBox, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+              <View style={styles.requestDetailRow}>
+                <Text style={[styles.requestDetailLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>O'qituvchi</Text>
+                <Text style={[styles.requestDetailValue, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+                  {getTeacherName(selectedRequest.teacherId)}
+                </Text>
+              </View>
+              <View style={styles.requestDetailRow}>
+                <Text style={[styles.requestDetailLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                  {selectedRequest.targetType === "student" ? "O'quvchi" : "Guruh"}
+                </Text>
+                <Text style={[styles.requestDetailValue, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+                  {getRequestTargetName(selectedRequest)}
+                </Text>
+              </View>
+              <View style={styles.requestDetailRow}>
+                <Text style={[styles.requestDetailLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>So'ralgan foiz</Text>
+                <Text style={[styles.requestDetailValue, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>
+                  {selectedRequest.percent}%
+                </Text>
+              </View>
+              <View style={styles.requestDetailRow}>
+                <Text style={[styles.requestDetailLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>Davr</Text>
+                <Text style={[styles.requestDetailValue, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
+                  {selectedRequest.period === "monthly" ? `${selectedRequest.month} oyiga` : "Cheksiz"}
+                </Text>
+              </View>
+              {selectedRequest.description && (
+                <View style={[styles.requestDesc, { borderTopColor: colors.border }]}>
+                  <Text style={[styles.requestDetailLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>Tavsif</Text>
+                  <Text style={[styles.requestDetailValue, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                    {selectedRequest.description}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 8 }]}>
+              Tasdiqlanadigan foiz (o'zgartirish mumkin)
+            </Text>
+            <FormField
+              label=""
+              value={resolveForm.approvedPercent}
+              onChangeText={v => setResolveForm(p => ({ ...p, approvedPercent: v }))}
+              placeholder={selectedRequest.percent.toString()}
+              keyboardType="numeric"
+              suffix="%"
+            />
+            <FormField
+              label="Davomiylik (oy) — bo'sh = so'ralganicha"
+              value={resolveForm.approvedDurationMonths}
+              onChangeText={v => setResolveForm(p => ({ ...p, approvedDurationMonths: v }))}
+              placeholder="ixtiyoriy"
+              keyboardType="numeric"
+            />
+
+            <View style={styles.resolveActions}>
+              <TouchableOpacity
+                style={[styles.rejectBtn, { borderColor: "#EF4444" }]}
+                onPress={rejectRequest}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="close-circle-outline" size={18} color="#EF4444" />
+                <Text style={[styles.rejectBtnText, { fontFamily: "Inter_600SemiBold" }]}>Rad etish</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.approveBtn, { backgroundColor: "#10B981", flex: 1 }]}
+                onPress={approveRequest}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={[styles.approveBtnText, { fontFamily: "Inter_600SemiBold" }]}>Tasdiqlash</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </ModalSheet>
     </>
   );
@@ -478,36 +782,74 @@ const styles = StyleSheet.create({
   revenueLabel: { fontSize: 14 },
   revenueValue: { fontSize: 18 },
   roleRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingBottom: 16 },
-  roleChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 12 },
+  roleChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 12 },
   roleText: { fontSize: 14 },
-  teacherRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
-  teacherAvatar: { width: 46, height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  teacherInitials: { fontSize: 16 },
-  teacherNameRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 },
-  teacherName: { fontSize: 15 },
-  statusDot: { width: 7, height: 7, borderRadius: 4 },
-  teacherSubject: { fontSize: 13, marginBottom: 2 },
-  teacherMeta: { fontSize: 12, marginBottom: 3 },
-  salaryBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: "flex-start" },
-  salaryBadgeText: { fontSize: 11 },
-  teacherActions: { flexDirection: "row", gap: 8 },
-  actionBtn: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  emptyTeachers: { alignItems: "center", paddingVertical: 32, gap: 8 },
+  teacherSelectorSection: { paddingHorizontal: 16, paddingBottom: 16 },
+  teacherSelectorLabel: { fontSize: 13, marginBottom: 10 },
+  teacherSelectorList: { gap: 8 },
+  teacherSelectorChip: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
+  teacherSelectorText: { fontSize: 14 },
+  pendingBadge: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  pendingBadgeText: { color: "#FFFFFF", fontSize: 12 },
+  requestRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  requestStatusDot: { width: 10, height: 10, borderRadius: 5 },
+  requestTitle: { fontSize: 14, marginBottom: 2 },
+  requestSub: { fontSize: 12 },
+  requestResolved: { fontSize: 12, marginTop: 2 },
+  discountRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  discountIconBox: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  discountName: { fontSize: 14, marginBottom: 2 },
+  discountSub: { fontSize: 12 },
+  discountRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  toggleBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  toggleText: { fontSize: 12 },
+  emptyRow: { alignItems: "center", paddingVertical: 24 },
+  emptyTeachers: { alignItems: "center", paddingVertical: 24, gap: 8 },
   emptyText: { fontSize: 14 },
-  infoRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
-  infoIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  infoLabel: { flex: 1, fontSize: 15 },
-  infoValue: { fontSize: 14 },
-  // Form
+  teacherRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14 },
+  teacherAvatar: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  teacherInitials: { fontSize: 16 },
+  teacherNameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 },
+  teacherName: { fontSize: 15 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  teacherSubject: { fontSize: 13, marginBottom: 2 },
+  teacherMeta: { fontSize: 12, marginBottom: 4 },
+  salaryBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, alignSelf: "flex-start", flexWrap: "wrap" },
+  salaryBadgeText: { fontSize: 12 },
+  percentStepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  stepperBtn: { width: 22, height: 22, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  stepperIcon: { fontSize: 16, lineHeight: 22, textAlign: "center" },
+  percentValue: { fontSize: 14, minWidth: 36, textAlign: "center" },
+  teacherActions: { gap: 8 },
+  actionBtn: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   fieldLabel: { fontSize: 13, marginBottom: 8 },
-  segmentRow: { flexDirection: "row", marginBottom: 18, gap: 0 },
-  segment: { flex: 1, alignItems: "center", paddingVertical: 14, gap: 3, borderWidth: 1 },
-  segmentLeft: { borderRadius: 12, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
-  segmentRight: { borderRadius: 12, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 },
+  segmentRow: { flexDirection: "row", gap: 0, marginBottom: 16, borderRadius: 14, overflow: "hidden" },
+  segment: { flex: 1, padding: 14, gap: 4, borderWidth: 1 },
+  segmentLeft: { borderTopLeftRadius: 14, borderBottomLeftRadius: 14 },
+  segmentRight: { borderTopRightRadius: 14, borderBottomRightRadius: 14 },
   segmentText: { fontSize: 14 },
   segmentSub: { fontSize: 11 },
   exampleBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 16 },
-  exampleText: { flex: 1, fontSize: 13, lineHeight: 18 },
-  saveBtn: { paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },
+  exampleText: { fontSize: 13, flex: 1, lineHeight: 18 },
+  discountTypeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
+  typeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  typeChipText: { fontSize: 12 },
+  requestDetailBox: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10, marginBottom: 16 },
+  requestDetailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  requestDetailLabel: { fontSize: 13 },
+  requestDetailValue: { fontSize: 14, textAlign: "right", flex: 1, marginLeft: 16 },
+  requestDesc: { borderTopWidth: 0.5, paddingTop: 10, gap: 4 },
+  resolveActions: { flexDirection: "row", gap: 12, marginTop: 8 },
+  rejectBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 14, paddingHorizontal: 20, borderRadius: 14, borderWidth: 1.5 },
+  rejectBtnText: { color: "#EF4444", fontSize: 15 },
+  approveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 14, borderRadius: 14 },
+  approveBtnText: { color: "#FFFFFF", fontSize: 15 },
+  infoRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 14 },
+  infoIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  infoLabel: { flex: 1, fontSize: 14 },
+  infoValue: { fontSize: 14 },
+  saveBtn: { paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 8 },
   saveBtnText: { color: "#FFFFFF", fontSize: 16 },
+  deleteBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", marginTop: 8, borderWidth: 1 },
+  deleteBtnText: { fontSize: 15 },
 });

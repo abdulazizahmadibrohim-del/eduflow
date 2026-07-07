@@ -9,12 +9,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { useIsDesktop } from "@/hooks/useIsDesktop";
 
 type Screen = "login" | "setup";
 
 export default function LoginScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const isDesktop = useIsDesktop();
   const { login, setupAdmin, isSetupDone, authUser } = useAuth();
 
   const [screen, setScreen] = useState<Screen>("login");
@@ -94,7 +96,7 @@ export default function LoginScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={[styles.inner, { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
+      <View style={[styles.inner, { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }, isDesktop && styles.innerDesktop]}>
         {/* Logo */}
         <View style={styles.logoWrap}>
           <View style={[styles.logoCircle, { backgroundColor: colors.primary }]}>
@@ -214,11 +216,12 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, paddingHorizontal: 24, justifyContent: "center" },
-  logoWrap: { alignItems: "center", marginBottom: 32 },
+  innerDesktop: { alignItems: "center", paddingHorizontal: 0 },
+  logoWrap: { alignItems: "center", marginBottom: 32, width: "100%", maxWidth: 480 },
   logoCircle: { width: 88, height: 88, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: 14 },
   appName: { fontSize: 32, marginBottom: 4 },
   tagline: { fontSize: 15 },
-  card: { borderRadius: 24, borderWidth: 1, padding: 24, gap: 12, marginBottom: 24 },
+  card: { borderRadius: 24, borderWidth: 1, padding: 24, gap: 12, marginBottom: 24, width: "100%", maxWidth: 480 },
   cardTitle: { fontSize: 20, marginBottom: 4 },
   inputWrap: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1 },
   input: { flex: 1, fontSize: 16, paddingVertical: 14 },

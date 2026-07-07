@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   Alert, Platform, ScrollView, StyleSheet, Text,
@@ -12,6 +13,7 @@ import {
   useApp, type Discount, type DiscountRequest, type DiscountType,
   type SalaryType, type Teacher, type UserRole,
 } from "@/context/AppContext";
+import { useAuth } from "@/context/AuthContext";
 import { useColors } from "@/hooks/useColors";
 
 const SUBJECT_COLORS: Record<string, string> = {
@@ -151,6 +153,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
   const colorScheme = useColorScheme();
+  const { logout } = useAuth();
   const {
     user, setUser,
     students, courses, groups, payments, teachers,
@@ -163,11 +166,19 @@ export default function SettingsScreen() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const pendingRequests = discountRequests.filter(r => r.status === "pending");
 
+  const handleLogout = () => {
+    Alert.alert("Chiqish", "Tizimdan chiqmoqchimisiz?", [
+      { text: "Bekor qilish", style: "cancel" },
+      { text: "Chiqish", style: "destructive", onPress: async () => { await logout(); router.replace("/login" as any); } },
+    ]);
+  };
+
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", phone: user?.phone ?? "", centerName: user?.centerName ?? "" });
 
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [teacherPin, setTeacherPin] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
 
   const [showDiscountModal, setShowDiscountModal] = useState(false);
@@ -181,15 +192,21 @@ export default function SettingsScreen() {
   const openAdd = () => {
     setEditingTeacher(null);
     setForm(EMPTY_FORM);
+    setTeacherPin("");
     setShowTeacherModal(true);
   };
   const openEdit = (t: Teacher) => {
     setEditingTeacher(t);
     setForm({ name: t.name, phone: t.phone, subject: t.subject, salaryType: t.salaryType, salary: t.salary?.toString() ?? "", salaryPercent: t.salaryPercent?.toString() ?? "", status: t.status });
+    setTeacherPin("");
     setShowTeacherModal(true);
   };
-  const saveTeacher = () => {
+  const saveTeacher = async () => {
     if (!form.name.trim() || !form.subject.trim()) return;
+    if (!editingTeacher && teacherPin.length < 4) {
+      Alert.alert("Xato", "O'qituvchi PIN kodi kamida 4 ta raqam bo'lishi kerak");
+      return;
+    }
     const base = {
       name: form.name.trim(), phone: form.phone.trim(), subject: form.subject.trim(),
       salaryType: form.salaryType,
@@ -197,8 +214,8 @@ export default function SettingsScreen() {
       salaryPercent: form.salaryType === "percentage" && form.salaryPercent ? parseFloat(form.salaryPercent) : undefined,
       status: form.status,
     };
-    if (editingTeacher) updateTeacher(editingTeacher.id, base);
-    else addTeacher(base);
+    if (editingTeacher) await updateTeacher(editingTeacher.id, base, teacherPin.length >= 4 ? teacherPin : undefined);
+    else await addTeacher(base, teacherPin);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowTeacherModal(false);
   };
@@ -685,7 +702,7 @@ export default function SettingsScreen() {
         )}
 
         <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 4 }]}>Holat</Text>
-        <View style={[styles.roleRow, { marginBottom: 20 }]}>
+        <View style={[styles.roleRow, { marginBottom: 16 }]}>
           {(["active", "inactive"] as const).map(s => (
             <TouchableOpacity
               key={s}
@@ -698,6 +715,22 @@ export default function SettingsScreen() {
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <FormField
+          label={editingTeacher ? "Yangi PIN kod (ixtiyoriy)" : "PIN kod * (4-6 raqam)"}
+          value={teacherPin}
+          onChangeText={setTeacherPin}
+          placeholder="masalan: 1234"
+          keyboardType="number-pad"
+          secureTextEntry
+          maxLength={6}
+        />
+        <View style={[styles.pinInfoBox, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "25" }]}>
+          <Ionicons name="lock-closed-outline" size={14} color={colors.primary} />
+          <Text style={[styles.pinInfoText, { color: colors.primary, fontFamily: "Inter_400Regular" }]}>
+            {editingTeacher ? "Bo'sh qoldirsa, eski PIN saqlanadi." : "O'qituvchi bu PIN bilan tizimga kiradi."}
+          </Text>
         </View>
 
         <TouchableOpacity
@@ -1078,4 +1111,8 @@ const styles = StyleSheet.create({
   saveBtnText: { color: "#FFFFFF", fontSize: 16 },
   deleteBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", marginTop: 8, borderWidth: 1 },
   deleteBtnText: { fontSize: 15 },
+  pinInfoBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: 12, borderWidth: 1, marginBottom: 16 },
+  pinInfoText: { fontSize: 12, flex: 1, lineHeight: 18 },
+  logoutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginHorizontal: 20, marginTop: 8, marginBottom: 24, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5 },
+  logoutBtnText: { fontSize: 15 },
 });

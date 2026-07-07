@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useAuth, type AuthUser } from "@/context/AuthContext";
 
 export type UserRole = "admin" | "teacher";
 
@@ -123,83 +125,142 @@ interface AppContextType {
   user: AppUser | null;
   setUser: (user: AppUser | null) => void;
   teachers: Teacher[];
-  addTeacher: (t: Omit<Teacher, "id" | "joinedAt">) => void;
-  updateTeacher: (id: string, data: Partial<Teacher>) => void;
-  deleteTeacher: (id: string) => void;
+  addTeacher: (t: Omit<Teacher, "id" | "joinedAt">, pin?: string) => Promise<void>;
+  updateTeacher: (id: string, data: Partial<Teacher>, pin?: string) => Promise<void>;
+  deleteTeacher: (id: string) => Promise<void>;
   students: Student[];
-  addStudent: (s: Omit<Student, "id" | "enrolledAt">) => void;
-  updateStudent: (id: string, data: Partial<Student>) => void;
-  deleteStudent: (id: string) => void;
+  addStudent: (s: Omit<Student, "id" | "enrolledAt">) => Promise<void>;
+  updateStudent: (id: string, data: Partial<Student>) => Promise<void>;
+  deleteStudent: (id: string) => Promise<void>;
   courses: Course[];
-  addCourse: (c: Omit<Course, "id">) => void;
-  updateCourse: (id: string, data: Partial<Course>) => void;
-  deleteCourse: (id: string) => void;
+  addCourse: (c: Omit<Course, "id">) => Promise<void>;
+  updateCourse: (id: string, data: Partial<Course>) => Promise<void>;
+  deleteCourse: (id: string) => Promise<void>;
   groups: Group[];
-  addGroup: (g: Omit<Group, "id">) => void;
-  updateGroup: (id: string, data: Partial<Group>) => void;
-  deleteGroup: (id: string) => void;
+  addGroup: (g: Omit<Group, "id">) => Promise<void>;
+  updateGroup: (id: string, data: Partial<Group>) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
   payments: Payment[];
-  addPayment: (p: Omit<Payment, "id">) => Payment;
-  updatePayment: (id: string, data: Partial<Payment>) => void;
-  addTransaction: (paymentId: string, tx: Omit<PaymentTransaction, "id">) => void;
+  addPayment: (p: Omit<Payment, "id">) => Promise<Payment>;
+  updatePayment: (id: string, data: Partial<Payment>) => Promise<void>;
+  addTransaction: (paymentId: string, tx: Omit<PaymentTransaction, "id">) => Promise<void>;
   attendances: Attendance[];
-  addAttendance: (a: Omit<Attendance, "id">) => void;
-  updateAttendance: (id: string, data: Partial<Attendance>) => void;
+  addAttendance: (a: Omit<Attendance, "id">) => Promise<void>;
+  updateAttendance: (id: string, data: Partial<Attendance>) => Promise<void>;
   discounts: Discount[];
-  addDiscount: (d: Omit<Discount, "id" | "createdAt">) => void;
-  updateDiscount: (id: string, data: Partial<Discount>) => void;
-  deleteDiscount: (id: string) => void;
+  addDiscount: (d: Omit<Discount, "id" | "createdAt">) => Promise<void>;
+  updateDiscount: (id: string, data: Partial<Discount>) => Promise<void>;
+  deleteDiscount: (id: string) => Promise<void>;
   discountRequests: DiscountRequest[];
-  addDiscountRequest: (r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => void;
-  resolveDiscountRequest: (id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => void;
+  addDiscountRequest: (r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => Promise<void>;
+  resolveDiscountRequest: (id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => Promise<void>;
   isLoading: boolean;
+  refreshAll: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
-
-const STORAGE_KEY = "eduflow_data_v4";
 
 function genId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
-const SAMPLE_TEACHERS: Teacher[] = [
-  { id: "t1", name: "Rahimov Bobur", phone: "+998901110001", subject: "Matematika", salaryType: "fixed", salary: 2000000, status: "active", joinedAt: "2025-09-01" },
-  { id: "t2", name: "Yusupova Dilnoza", phone: "+998901110002", subject: "Ingliz tili", salaryType: "percentage", salaryPercent: 40, status: "active", joinedAt: "2025-10-01" },
-];
+function hashPin(pin: string): string {
+  let hash = 0;
+  for (let i = 0; i < pin.length; i++) {
+    const char = pin.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16).padStart(8, "0");
+}
 
-const SAMPLE_COURSES: Course[] = [
-  { id: "c1", name: "Matematika", description: "Umumiy matematik kurs", price: 350000, duration: 3, color: "#1E3A8A", teacherId: "t1" },
-  { id: "c2", name: "Ingliz tili", description: "Ingliz tili kursi", price: 450000, duration: 3, color: "#7C3AED", teacherId: "t2" },
-  { id: "c3", name: "Dasturlash", description: "Python va Web dasturlash", price: 600000, duration: 6, color: "#10B981" },
-];
+// Map DB row → Teacher
+function dbToTeacher(r: any): Teacher {
+  return {
+    id: r.id, name: r.name, phone: r.phone, subject: r.subject,
+    salaryType: r.salary_type as SalaryType,
+    salary: r.salary ?? undefined,
+    salaryPercent: r.salary_percent ?? undefined,
+    status: r.status as "active" | "inactive",
+    joinedAt: r.joined_at,
+  };
+}
 
-const SAMPLE_GROUPS: Group[] = [
-  { id: "g1", name: "Mat-A", courseId: "c1", teacherId: "t1", schedule: "Du-Cho-Ju, 09:00", maxStudents: 15, room: "204-xona" },
-  { id: "g2", name: "Ingliz-B1", courseId: "c2", teacherId: "t2", schedule: "Se-Sha-Yak, 11:00", maxStudents: 12, room: "101-xona" },
-];
+function dbToStudent(r: any): Student {
+  return {
+    id: r.id, name: r.name, phone: r.phone,
+    parentPhone: r.parent_phone ?? undefined,
+    courseId: r.course_id, groupId: r.group_id,
+    enrolledAt: r.enrolled_at,
+    status: r.status as "active" | "inactive",
+  };
+}
 
-const SAMPLE_STUDENTS: Student[] = [
-  { id: "s1", name: "Aliyev Sardor", phone: "+998901234567", courseId: "c1", groupId: "g1", enrolledAt: "2026-01-15", status: "active" },
-  { id: "s2", name: "Karimova Zilola", phone: "+998901234568", courseId: "c2", groupId: "g2", enrolledAt: "2026-01-20", status: "active" },
-  { id: "s3", name: "Toshmatov Jasur", phone: "+998901234569", courseId: "c1", groupId: "g1", enrolledAt: "2026-02-01", status: "active" },
-  { id: "s4", name: "Nazarova Munira", phone: "+998901234570", courseId: "c3", groupId: "g1", enrolledAt: "2026-02-10", status: "inactive" },
-];
+function dbToCourse(r: any): Course {
+  return {
+    id: r.id, name: r.name,
+    description: r.description ?? undefined,
+    price: r.price, duration: r.duration, color: r.color,
+    teacherId: r.teacher_id ?? undefined,
+  };
+}
 
-const SAMPLE_PAYMENTS: Payment[] = [
-  { id: "p1", studentId: "s1", amount: 350000, month: "2026-07", paidAt: "2026-07-01", status: "paid", method: "cash", transactions: [{ id: "tx1", amount: 350000, method: "cash", paidAt: "2026-07-01" }], paidTotal: 350000 },
-  { id: "p2", studentId: "s2", amount: 450000, month: "2026-07", status: "pending", paidTotal: 0 },
-  { id: "p3", studentId: "s3", amount: 350000, month: "2026-07", status: "overdue", paidTotal: 0 },
-  { id: "p4", studentId: "s1", amount: 350000, month: "2026-06", paidAt: "2026-06-02", status: "paid", method: "cash", transactions: [{ id: "tx2", amount: 350000, method: "cash", paidAt: "2026-06-02" }], paidTotal: 350000 },
-];
+function dbToGroup(r: any): Group {
+  return {
+    id: r.id, name: r.name,
+    courseId: r.course_id, teacherId: r.teacher_id,
+    schedule: r.schedule, maxStudents: r.max_students,
+    room: r.room ?? undefined,
+  };
+}
 
-const SAMPLE_DISCOUNTS: Discount[] = [
-  { id: "d1", name: "Erta to'lov (1–10 kun)", type: "earlybird", percent: 10, startDay: 1, endDay: 10, active: true, createdAt: "2026-01-01" },
-  { id: "d2", name: "Erta to'lov (11–15 kun)", type: "earlybird", percent: 5, startDay: 11, endDay: 15, active: true, createdAt: "2026-01-01" },
-  { id: "d3", name: "Ro'yxatdan o'tish chegirmasi", type: "registration", percent: 20, durationMonths: 1, active: true, createdAt: "2026-01-01" },
-];
+function dbToPayment(r: any, txRows: any[]): Payment {
+  const txs = txRows.filter(t => t.payment_id === r.id).map(t => ({
+    id: t.id, amount: t.amount, method: t.method as "cash" | "card",
+    receiptUri: t.receipt_uri ?? undefined,
+    paidAt: t.paid_at, note: t.note ?? undefined,
+  }));
+  return {
+    id: r.id, studentId: r.student_id, amount: r.amount,
+    month: r.month, paidAt: r.paid_at ?? undefined,
+    status: r.status as Payment["status"],
+    note: r.note ?? undefined, method: r.method ?? undefined,
+    paidTotal: r.paid_total ?? 0,
+    transactions: txs,
+  };
+}
+
+function dbToAttendance(r: any): Attendance {
+  return { id: r.id, studentId: r.student_id, groupId: r.group_id, date: r.date, status: r.status as Attendance["status"] };
+}
+
+function dbToDiscount(r: any): Discount {
+  return {
+    id: r.id, name: r.name, type: r.type as DiscountType,
+    targetId: r.target_id ?? undefined, month: r.month ?? undefined,
+    percent: r.percent, durationMonths: r.duration_months ?? undefined,
+    startDay: r.start_day ?? undefined, endDay: r.end_day ?? undefined,
+    active: r.active, createdAt: r.created_at,
+  };
+}
+
+function dbToDiscountRequest(r: any): DiscountRequest {
+  return {
+    id: r.id, teacherId: r.teacher_id,
+    targetType: r.target_type as "student" | "group",
+    targetId: r.target_id, period: r.period as "monthly" | "unlimited",
+    month: r.month ?? undefined, percent: r.percent,
+    description: r.description ?? undefined,
+    status: r.status as DiscountRequest["status"],
+    approvedPercent: r.approved_percent ?? undefined,
+    approvedDurationMonths: r.approved_duration_months ?? undefined,
+    createdAt: r.created_at, resolvedAt: r.resolved_at ?? undefined,
+  };
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { authUser } = useAuth();
+
   const [user, setUserState] = useState<AppUser | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -211,177 +272,308 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [discountRequests, setDiscountRequests] = useState<DiscountRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    if (authUser) {
+      const u: AppUser = {
+        id: authUser.id, name: authUser.name, role: authUser.role,
+        phone: authUser.phone, teacherId: authUser.teacherId,
+        centerName: authUser.centerName,
+      };
+      setUserState(u);
+      loadAll();
+    } else {
+      setUserState(null);
+      setIsLoading(false);
+    }
+  }, [authUser]);
 
-  const loadData = async () => {
+  const loadAll = async () => {
+    setIsLoading(true);
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const data = JSON.parse(raw);
-        if (data.user) setUserState(data.user);
-        setTeachers(data.teachers ?? SAMPLE_TEACHERS);
-        setStudents(data.students ?? SAMPLE_STUDENTS);
-        setCourses(data.courses ?? SAMPLE_COURSES);
-        setGroups(data.groups ?? SAMPLE_GROUPS);
-        setPayments(data.payments ?? SAMPLE_PAYMENTS);
-        setAttendances(data.attendances ?? []);
-        setDiscounts(data.discounts ?? SAMPLE_DISCOUNTS);
-        setDiscountRequests(data.discountRequests ?? []);
-      } else {
-        setTeachers(SAMPLE_TEACHERS);
-        setStudents(SAMPLE_STUDENTS);
-        setCourses(SAMPLE_COURSES);
-        setGroups(SAMPLE_GROUPS);
-        setPayments(SAMPLE_PAYMENTS);
-        setDiscounts(SAMPLE_DISCOUNTS);
-      }
-    } catch {
-      setTeachers(SAMPLE_TEACHERS);
-      setStudents(SAMPLE_STUDENTS);
-      setCourses(SAMPLE_COURSES);
-      setGroups(SAMPLE_GROUPS);
-      setPayments(SAMPLE_PAYMENTS);
-      setDiscounts(SAMPLE_DISCOUNTS);
+      const [
+        { data: tRows }, { data: cRows }, { data: gRows },
+        { data: sRows }, { data: pRows }, { data: txRows },
+        { data: aRows }, { data: dRows }, { data: drRows },
+      ] = await Promise.all([
+        supabase.from("teachers").select("*").order("created_at"),
+        supabase.from("courses").select("*").order("created_at"),
+        supabase.from("groups").select("*").order("created_at"),
+        supabase.from("students").select("*").order("created_at"),
+        supabase.from("payments").select("*").order("created_at"),
+        supabase.from("payment_transactions").select("*").order("created_at"),
+        supabase.from("attendances").select("*").order("date"),
+        supabase.from("discounts").select("*").order("created_at"),
+        supabase.from("discount_requests").select("*").order("created_at"),
+      ]);
+
+      setTeachers((tRows ?? []).map(dbToTeacher));
+      setCourses((cRows ?? []).map(dbToCourse));
+      setGroups((gRows ?? []).map(dbToGroup));
+      setStudents((sRows ?? []).map(dbToStudent));
+      const allTx = txRows ?? [];
+      setPayments((pRows ?? []).map(r => dbToPayment(r, allTx)));
+      setAttendances((aRows ?? []).map(dbToAttendance));
+      setDiscounts((dRows ?? []).map(dbToDiscount));
+      setDiscountRequests((drRows ?? []).map(dbToDiscountRequest));
+    } catch (e) {
+      console.error("loadAll error", e);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const persist = useCallback(async (updates: {
-    user?: AppUser | null;
-    teachers?: Teacher[];
-    students?: Student[];
-    courses?: Course[];
-    groups?: Group[];
-    payments?: Payment[];
-    attendances?: Attendance[];
-    discounts?: Discount[];
-    discountRequests?: DiscountRequest[];
-  }) => {
-    try {
-      const current = await AsyncStorage.getItem(STORAGE_KEY);
-      const existing = current ? JSON.parse(current) : {};
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...existing, ...updates }));
-    } catch {}
+  const setUser = useCallback((u: AppUser | null) => { setUserState(u); }, []);
+
+  const addTeacher = useCallback(async (t: Omit<Teacher, "id" | "joinedAt">, pin?: string) => {
+    const row: any = {
+      id: genId(), name: t.name, phone: t.phone, subject: t.subject,
+      salary_type: t.salaryType, salary: t.salary ?? null,
+      salary_percent: t.salaryPercent ?? null, status: t.status,
+      joined_at: new Date().toISOString().split("T")[0],
+    };
+    if (pin) row.pin_hash = hashPin(pin);
+    const { data, error } = await supabase.from("teachers").insert(row).select().single();
+    if (!error && data) setTeachers(prev => [...prev, dbToTeacher(data)]);
   }, []);
 
-  const setUser = useCallback((u: AppUser | null) => {
-    setUserState(u);
-    persist({ user: u });
-  }, [persist]);
+  const updateTeacher = useCallback(async (id: string, data: Partial<Teacher>, pin?: string) => {
+    const row: any = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.phone !== undefined) row.phone = data.phone;
+    if (data.subject !== undefined) row.subject = data.subject;
+    if (data.salaryType !== undefined) row.salary_type = data.salaryType;
+    if (data.salary !== undefined) row.salary = data.salary;
+    if (data.salaryPercent !== undefined) row.salary_percent = data.salaryPercent;
+    if (data.status !== undefined) row.status = data.status;
+    if (pin) row.pin_hash = hashPin(pin);
+    const { data: updated } = await supabase.from("teachers").update(row).eq("id", id).select().single();
+    if (updated) setTeachers(prev => prev.map(t => t.id === id ? dbToTeacher(updated) : t));
+  }, []);
 
-  const addTeacher = useCallback((t: Omit<Teacher, "id" | "joinedAt">) => {
-    const newT: Teacher = { ...t, id: genId(), joinedAt: new Date().toISOString().split("T")[0] };
-    setTeachers(prev => { const next = [...prev, newT]; persist({ teachers: next }); return next; });
-  }, [persist]);
+  const deleteTeacher = useCallback(async (id: string) => {
+    await supabase.from("teachers").delete().eq("id", id);
+    setTeachers(prev => prev.filter(t => t.id !== id));
+  }, []);
 
-  const updateTeacher = useCallback((id: string, data: Partial<Teacher>) => {
-    setTeachers(prev => { const next = prev.map(t => t.id === id ? { ...t, ...data } : t); persist({ teachers: next }); return next; });
-  }, [persist]);
+  const addStudent = useCallback(async (s: Omit<Student, "id" | "enrolledAt">) => {
+    const row = {
+      id: genId(), name: s.name, phone: s.phone,
+      parent_phone: s.parentPhone ?? null,
+      course_id: s.courseId, group_id: s.groupId, status: s.status,
+      enrolled_at: new Date().toISOString().split("T")[0],
+    };
+    const { data, error } = await supabase.from("students").insert(row).select().single();
+    if (!error && data) setStudents(prev => [...prev, dbToStudent(data)]);
+  }, []);
 
-  const deleteTeacher = useCallback((id: string) => {
-    setTeachers(prev => { const next = prev.filter(t => t.id !== id); persist({ teachers: next }); return next; });
-  }, [persist]);
+  const updateStudent = useCallback(async (id: string, data: Partial<Student>) => {
+    const row: any = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.phone !== undefined) row.phone = data.phone;
+    if (data.parentPhone !== undefined) row.parent_phone = data.parentPhone;
+    if (data.courseId !== undefined) row.course_id = data.courseId;
+    if (data.groupId !== undefined) row.group_id = data.groupId;
+    if (data.status !== undefined) row.status = data.status;
+    const { data: updated } = await supabase.from("students").update(row).eq("id", id).select().single();
+    if (updated) setStudents(prev => prev.map(s => s.id === id ? dbToStudent(updated) : s));
+  }, []);
 
-  const addStudent = useCallback((s: Omit<Student, "id" | "enrolledAt">) => {
-    const newS: Student = { ...s, id: genId(), enrolledAt: new Date().toISOString().split("T")[0] };
-    setStudents(prev => { const next = [...prev, newS]; persist({ students: next }); return next; });
-  }, [persist]);
+  const deleteStudent = useCallback(async (id: string) => {
+    await supabase.from("students").delete().eq("id", id);
+    setStudents(prev => prev.filter(s => s.id !== id));
+  }, []);
 
-  const updateStudent = useCallback((id: string, data: Partial<Student>) => {
-    setStudents(prev => { const next = prev.map(s => s.id === id ? { ...s, ...data } : s); persist({ students: next }); return next; });
-  }, [persist]);
+  const addCourse = useCallback(async (c: Omit<Course, "id">) => {
+    const row = {
+      id: genId(), name: c.name, description: c.description ?? null,
+      price: c.price, duration: c.duration, color: c.color,
+      teacher_id: c.teacherId ?? null,
+    };
+    const { data, error } = await supabase.from("courses").insert(row).select().single();
+    if (!error && data) setCourses(prev => [...prev, dbToCourse(data)]);
+  }, []);
 
-  const deleteStudent = useCallback((id: string) => {
-    setStudents(prev => { const next = prev.filter(s => s.id !== id); persist({ students: next }); return next; });
-  }, [persist]);
+  const updateCourse = useCallback(async (id: string, data: Partial<Course>) => {
+    const row: any = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.description !== undefined) row.description = data.description;
+    if (data.price !== undefined) row.price = data.price;
+    if (data.duration !== undefined) row.duration = data.duration;
+    if (data.color !== undefined) row.color = data.color;
+    if (data.teacherId !== undefined) row.teacher_id = data.teacherId;
+    const { data: updated } = await supabase.from("courses").update(row).eq("id", id).select().single();
+    if (updated) setCourses(prev => prev.map(c => c.id === id ? dbToCourse(updated) : c));
+  }, []);
 
-  const addCourse = useCallback((c: Omit<Course, "id">) => {
-    const newC: Course = { ...c, id: genId() };
-    setCourses(prev => { const next = [...prev, newC]; persist({ courses: next }); return next; });
-  }, [persist]);
+  const deleteCourse = useCallback(async (id: string) => {
+    await supabase.from("courses").delete().eq("id", id);
+    setCourses(prev => prev.filter(c => c.id !== id));
+  }, []);
 
-  const updateCourse = useCallback((id: string, data: Partial<Course>) => {
-    setCourses(prev => { const next = prev.map(c => c.id === id ? { ...c, ...data } : c); persist({ courses: next }); return next; });
-  }, [persist]);
+  const addGroup = useCallback(async (g: Omit<Group, "id">) => {
+    const row = {
+      id: genId(), name: g.name, course_id: g.courseId,
+      teacher_id: g.teacherId, schedule: g.schedule,
+      max_students: g.maxStudents, room: g.room ?? null,
+    };
+    const { data, error } = await supabase.from("groups").insert(row).select().single();
+    if (!error && data) setGroups(prev => [...prev, dbToGroup(data)]);
+  }, []);
 
-  const deleteCourse = useCallback((id: string) => {
-    setCourses(prev => { const next = prev.filter(c => c.id !== id); persist({ courses: next }); return next; });
-  }, [persist]);
+  const updateGroup = useCallback(async (id: string, data: Partial<Group>) => {
+    const row: any = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.courseId !== undefined) row.course_id = data.courseId;
+    if (data.teacherId !== undefined) row.teacher_id = data.teacherId;
+    if (data.schedule !== undefined) row.schedule = data.schedule;
+    if (data.maxStudents !== undefined) row.max_students = data.maxStudents;
+    if (data.room !== undefined) row.room = data.room;
+    const { data: updated } = await supabase.from("groups").update(row).eq("id", id).select().single();
+    if (updated) setGroups(prev => prev.map(g => g.id === id ? dbToGroup(updated) : g));
+  }, []);
 
-  const addGroup = useCallback((g: Omit<Group, "id">) => {
-    const newG: Group = { ...g, id: genId() };
-    setGroups(prev => { const next = [...prev, newG]; persist({ groups: next }); return next; });
-  }, [persist]);
+  const deleteGroup = useCallback(async (id: string) => {
+    await supabase.from("groups").delete().eq("id", id);
+    setGroups(prev => prev.filter(g => g.id !== id));
+  }, []);
 
-  const updateGroup = useCallback((id: string, data: Partial<Group>) => {
-    setGroups(prev => { const next = prev.map(g => g.id === id ? { ...g, ...data } : g); persist({ groups: next }); return next; });
-  }, [persist]);
+  const addPayment = useCallback(async (p: Omit<Payment, "id">): Promise<Payment> => {
+    const id = genId();
+    const row = {
+      id, student_id: p.studentId, amount: p.amount, month: p.month,
+      paid_at: p.paidAt ?? null, status: p.status,
+      note: p.note ?? null, method: p.method ?? null,
+      paid_total: p.paidTotal ?? 0,
+    };
+    const { data, error } = await supabase.from("payments").insert(row).select().single();
+    if (error || !data) throw new Error(error?.message ?? "To'lov qo'shilmadi");
 
-  const deleteGroup = useCallback((id: string) => {
-    setGroups(prev => { const next = prev.filter(g => g.id !== id); persist({ groups: next }); return next; });
-  }, [persist]);
+    const txs = p.transactions ?? [];
+    let savedTxs: PaymentTransaction[] = [];
+    if (txs.length > 0) {
+      const txRows = txs.map(tx => ({
+        id: genId(), payment_id: id, amount: tx.amount,
+        method: tx.method, paid_at: tx.paidAt, note: tx.note ?? null,
+      }));
+      const { data: txData } = await supabase.from("payment_transactions").insert(txRows).select();
+      savedTxs = (txData ?? []).map(t => ({
+        id: t.id, amount: t.amount, method: t.method as "cash" | "card",
+        paidAt: t.paid_at, note: t.note ?? undefined,
+      }));
+    }
 
-  const addPayment = useCallback((p: Omit<Payment, "id">): Payment => {
-    const newP: Payment = { ...p, id: genId(), paidTotal: p.paidTotal ?? 0, transactions: p.transactions ?? [] };
-    setPayments(prev => { const next = [...prev, newP]; persist({ payments: next }); return next; });
+    const newP = dbToPayment(data, savedTxs.map(tx => ({ ...tx, payment_id: id, paid_at: tx.paidAt, receipt_uri: tx.receiptUri })));
+    newP.transactions = savedTxs;
+    setPayments(prev => [...prev, newP]);
     return newP;
-  }, [persist]);
+  }, []);
 
-  const updatePayment = useCallback((id: string, data: Partial<Payment>) => {
-    setPayments(prev => { const next = prev.map(p => p.id === id ? { ...p, ...data } : p); persist({ payments: next }); return next; });
-  }, [persist]);
+  const updatePayment = useCallback(async (id: string, data: Partial<Payment>) => {
+    const row: any = {};
+    if (data.status !== undefined) row.status = data.status;
+    if (data.paidAt !== undefined) row.paid_at = data.paidAt;
+    if (data.paidTotal !== undefined) row.paid_total = data.paidTotal;
+    if (data.note !== undefined) row.note = data.note;
+    const { data: updated } = await supabase.from("payments").update(row).eq("id", id).select().single();
+    if (updated) {
+      setPayments(prev => prev.map(p => {
+        if (p.id !== id) return p;
+        return { ...p, ...data };
+      }));
+    }
+  }, []);
 
-  const addTransaction = useCallback((paymentId: string, tx: Omit<PaymentTransaction, "id">) => {
-    const newTx: PaymentTransaction = { ...tx, id: genId() };
-    setPayments(prev => {
-      const next = prev.map(p => {
-        if (p.id !== paymentId) return p;
-        const txs = [...(p.transactions ?? []), newTx];
-        const paidTotal = txs.reduce((s, t) => s + t.amount, 0);
-        const status: Payment["status"] = paidTotal >= p.amount ? "paid" : paidTotal > 0 ? "partial" : p.status;
-        const paidAt = paidTotal >= p.amount ? newTx.paidAt : p.paidAt;
-        return { ...p, transactions: txs, paidTotal, status, paidAt };
-      });
-      persist({ payments: next });
-      return next;
-    });
-  }, [persist]);
+  const addTransaction = useCallback(async (paymentId: string, tx: Omit<PaymentTransaction, "id">) => {
+    const payment = payments.find(p => p.id === paymentId);
+    if (!payment) return;
 
-  const addAttendance = useCallback((a: Omit<Attendance, "id">) => {
-    const newA: Attendance = { ...a, id: genId() };
-    setAttendances(prev => { const next = [...prev, newA]; persist({ attendances: next }); return next; });
-  }, [persist]);
+    const txRow = {
+      id: genId(), payment_id: paymentId,
+      amount: tx.amount, method: tx.method,
+      receipt_uri: tx.receiptUri ?? null,
+      paid_at: tx.paidAt, note: tx.note ?? null,
+    };
+    const { data: txData } = await supabase.from("payment_transactions").insert(txRow).select().single();
 
-  const updateAttendance = useCallback((id: string, data: Partial<Attendance>) => {
-    setAttendances(prev => { const next = prev.map(a => a.id === id ? { ...a, ...data } : a); persist({ attendances: next }); return next; });
-  }, [persist]);
+    const newTx: PaymentTransaction = {
+      id: txData?.id ?? genId(), amount: tx.amount, method: tx.method,
+      receiptUri: tx.receiptUri, paidAt: tx.paidAt, note: tx.note,
+    };
+    const allTxs = [...(payment.transactions ?? []), newTx];
+    const paidTotal = allTxs.reduce((s, t) => s + t.amount, 0);
+    const status: Payment["status"] = paidTotal >= payment.amount ? "paid" : paidTotal > 0 ? "partial" : payment.status;
+    const paidAt = paidTotal >= payment.amount ? tx.paidAt : payment.paidAt;
 
-  const addDiscount = useCallback((d: Omit<Discount, "id" | "createdAt">) => {
-    const newD: Discount = { ...d, id: genId(), createdAt: new Date().toISOString().split("T")[0] };
-    setDiscounts(prev => { const next = [...prev, newD]; persist({ discounts: next }); return next; });
-  }, [persist]);
+    await supabase.from("payments").update({ paid_total: paidTotal, status, paid_at: paidAt ?? null }).eq("id", paymentId);
+    setPayments(prev => prev.map(p => p.id === paymentId
+      ? { ...p, transactions: allTxs, paidTotal, status, paidAt }
+      : p
+    ));
+  }, [payments]);
 
-  const updateDiscount = useCallback((id: string, data: Partial<Discount>) => {
-    setDiscounts(prev => { const next = prev.map(d => d.id === id ? { ...d, ...data } : d); persist({ discounts: next }); return next; });
-  }, [persist]);
+  const addAttendance = useCallback(async (a: Omit<Attendance, "id">) => {
+    const row = { id: genId(), student_id: a.studentId, group_id: a.groupId, date: a.date, status: a.status };
+    const { data } = await supabase.from("attendances").insert(row).select().single();
+    if (data) setAttendances(prev => [...prev, dbToAttendance(data)]);
+  }, []);
 
-  const deleteDiscount = useCallback((id: string) => {
-    setDiscounts(prev => { const next = prev.filter(d => d.id !== id); persist({ discounts: next }); return next; });
-  }, [persist]);
+  const updateAttendance = useCallback(async (id: string, data: Partial<Attendance>) => {
+    const row: any = {};
+    if (data.status !== undefined) row.status = data.status;
+    await supabase.from("attendances").update(row).eq("id", id);
+    setAttendances(prev => prev.map(a => a.id === id ? { ...a, ...data } : a));
+  }, []);
 
-  const addDiscountRequest = useCallback((r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => {
-    const newR: DiscountRequest = { ...r, id: genId(), status: "pending", createdAt: new Date().toISOString().split("T")[0] };
-    setDiscountRequests(prev => { const next = [...prev, newR]; persist({ discountRequests: next }); return next; });
-  }, [persist]);
+  const addDiscount = useCallback(async (d: Omit<Discount, "id" | "createdAt">) => {
+    const row = {
+      id: genId(), name: d.name, type: d.type,
+      target_id: d.targetId ?? null, month: d.month ?? null,
+      percent: d.percent, duration_months: d.durationMonths ?? null,
+      start_day: d.startDay ?? null, end_day: d.endDay ?? null,
+      active: d.active,
+    };
+    const { data } = await supabase.from("discounts").insert(row).select().single();
+    if (data) setDiscounts(prev => [...prev, dbToDiscount(data)]);
+  }, []);
 
-  const resolveDiscountRequest = useCallback((id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => {
-    setDiscountRequests(prev => {
-      const next = prev.map(r => r.id === id ? { ...r, ...resolution, resolvedAt: new Date().toISOString().split("T")[0] } : r);
-      persist({ discountRequests: next });
-      return next;
-    });
-  }, [persist]);
+  const updateDiscount = useCallback(async (id: string, data: Partial<Discount>) => {
+    const row: any = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.active !== undefined) row.active = data.active;
+    if (data.percent !== undefined) row.percent = data.percent;
+    await supabase.from("discounts").update(row).eq("id", id);
+    setDiscounts(prev => prev.map(d => d.id === id ? { ...d, ...data } : d));
+  }, []);
+
+  const deleteDiscount = useCallback(async (id: string) => {
+    await supabase.from("discounts").delete().eq("id", id);
+    setDiscounts(prev => prev.filter(d => d.id !== id));
+  }, []);
+
+  const addDiscountRequest = useCallback(async (r: Omit<DiscountRequest, "id" | "createdAt" | "status">) => {
+    const row = {
+      id: genId(), teacher_id: r.teacherId,
+      target_type: r.targetType, target_id: r.targetId,
+      period: r.period, month: r.month ?? null,
+      percent: r.percent, description: r.description ?? null,
+      status: "pending",
+    };
+    const { data } = await supabase.from("discount_requests").insert(row).select().single();
+    if (data) setDiscountRequests(prev => [...prev, dbToDiscountRequest(data)]);
+  }, []);
+
+  const resolveDiscountRequest = useCallback(async (id: string, resolution: { status: "approved" | "rejected"; approvedPercent?: number; approvedDurationMonths?: number }) => {
+    const row: any = {
+      status: resolution.status,
+      resolved_at: new Date().toISOString(),
+      approved_percent: resolution.approvedPercent ?? null,
+      approved_duration_months: resolution.approvedDurationMonths ?? null,
+    };
+    await supabase.from("discount_requests").update(row).eq("id", id);
+    setDiscountRequests(prev => prev.map(r => r.id === id ? { ...r, ...resolution, resolvedAt: new Date().toISOString().split("T")[0] } : r));
+  }, []);
+
+  const refreshAll = useCallback(async () => { await loadAll(); }, []);
 
   return (
     <AppContext.Provider value={{
@@ -394,7 +586,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       attendances, addAttendance, updateAttendance,
       discounts, addDiscount, updateDiscount, deleteDiscount,
       discountRequests, addDiscountRequest, resolveDiscountRequest,
-      isLoading,
+      isLoading, refreshAll,
     }}>
       {children}
     </AppContext.Provider>

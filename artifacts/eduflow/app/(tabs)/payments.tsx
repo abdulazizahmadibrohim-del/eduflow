@@ -37,6 +37,7 @@ export default function PaymentsScreen() {
 
   const isAdmin = (user?.role ?? "admin") === "admin";
   const isTeacher = user?.role === "teacher";
+  const canManagePayments = isAdmin || isTeacher;
 
   const [tab, setTab] = useState<Tab>("payments");
   const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -244,7 +245,7 @@ export default function PaymentsScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPadding + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: "Inter_700Bold" }]}>To'lovlar</Text>
-        {isAdmin && (
+        {canManagePayments && (
           <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={openAdd} activeOpacity={0.85}>
             <Ionicons name="add" size={22} color="#FFFFFF" />
           </TouchableOpacity>
@@ -317,12 +318,12 @@ export default function PaymentsScreen() {
             </View>
           </View>
 
-          {/* Teacher read-only notice */}
+          {/* Teacher info notice */}
           {isTeacher && (
-            <View style={[styles.teacherNotice, { backgroundColor: colors.secondary + "12", borderColor: colors.secondary + "25" }]}>
-              <Ionicons name="eye-outline" size={15} color={colors.secondary} />
-              <Text style={[styles.teacherNoticeText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
-                Siz faqat o'z guruhlari o'quvchilarining to'lovlarini ko'ra olasiz.
+            <View style={[styles.teacherNotice, { backgroundColor: colors.accent + "12", borderColor: colors.accent + "30" }]}>
+              <Ionicons name="shield-checkmark-outline" size={15} color={colors.accent} />
+              <Text style={[styles.teacherNoticeText, { color: colors.accent, fontFamily: "Inter_400Regular" }]}>
+                Siz faqat o'z guruhlari o'quvchilarining to'lovlarini boshqara olasiz.
               </Text>
             </View>
           )}
@@ -374,8 +375,8 @@ export default function PaymentsScreen() {
               <PaymentCard
                 payment={item}
                 student={students.find(s => s.id === item.studentId)}
-                onMarkPaid={isAdmin ? () => openTxModal(item.id) : undefined}
-                onAddTransaction={isAdmin ? () => openTxModal(item.id) : undefined}
+                onMarkPaid={canManagePayments ? () => openTxModal(item.id) : undefined}
+                onAddTransaction={canManagePayments ? () => openTxModal(item.id) : undefined}
               />
             )}
             contentContainerStyle={[styles.list, { paddingBottom: isWeb ? 34 + 80 : 80 }]}
@@ -384,8 +385,8 @@ export default function PaymentsScreen() {
                 icon="card-outline"
                 title="To'lovlar yo'q"
                 description={isTeacher ? "Bu guruhda hali to'lov kiritilmagan" : "Hali hech qanday to'lov kiritilmagan"}
-                actionLabel={isAdmin ? "To'lov qo'shish" : undefined}
-                onAction={isAdmin ? openAdd : undefined}
+                actionLabel={canManagePayments ? "To'lov qo'shish" : undefined}
+                onAction={canManagePayments ? openAdd : undefined}
               />
             }
             showsVerticalScrollIndicator={false}
@@ -577,8 +578,8 @@ export default function PaymentsScreen() {
         </ScrollView>
       )}
 
-      {/* New Payment Modal (admin only) */}
-      {isAdmin && (
+      {/* New Payment Modal */}
+      {canManagePayments && (
         <ModalSheet visible={showModal} onClose={() => setShowModal(false)} title="Yangi to'lov">
           <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>O'quvchi</Text>
           <View style={styles.selectorColumn}>

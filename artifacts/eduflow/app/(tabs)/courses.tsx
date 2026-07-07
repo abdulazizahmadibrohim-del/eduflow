@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
-import { Alert, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Course, type Group } from "@/context/AppContext";
@@ -17,7 +17,7 @@ export default function CoursesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
-  const { courses, groups, students, addCourse, updateCourse, deleteCourse, addGroup, updateGroup, deleteGroup } = useApp();
+  const { courses, groups, students, teachers, addCourse, updateCourse, deleteCourse, addGroup, updateGroup, deleteGroup } = useApp();
 
   const [tab, setTab] = useState<"courses" | "groups">("courses");
   const [showCourseModal, setShowCourseModal] = useState(false);
@@ -26,7 +26,7 @@ export default function CoursesScreen() {
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
 
   const [courseForm, setCourseForm] = useState({ name: "", description: "", price: "", duration: "3", color: COLORS[0] });
-  const [groupForm, setGroupForm] = useState({ name: "", courseId: "", teacherId: "u1", schedule: "", maxStudents: "15", room: "" });
+  const [groupForm, setGroupForm] = useState({ name: "", courseId: "", teacherId: "", schedule: "", maxStudents: "15", room: "" });
 
   const openAddCourse = () => {
     setEditingCourse(null);
@@ -55,7 +55,7 @@ export default function CoursesScreen() {
 
   const openAddGroup = () => {
     setEditingGroup(null);
-    setGroupForm({ name: "", courseId: courses[0]?.id ?? "", teacherId: "u1", schedule: "", maxStudents: "15", room: "" });
+    setGroupForm({ name: "", courseId: courses[0]?.id ?? "", teacherId: teachers[0]?.id ?? "", schedule: "", maxStudents: "15", room: "" });
     setShowGroupModal(true);
   };
   const openEditGroup = (g: Group) => {
@@ -129,6 +129,7 @@ export default function CoursesScreen() {
           keyExtractor={item => item.id}
           renderItem={({ item }) => {
             const course = courses.find(c => c.id === item.courseId);
+            const teacher = teachers.find(t => t.id === item.teacherId);
             const count = students.filter(s => s.groupId === item.id).length;
             return (
               <TouchableOpacity
@@ -145,6 +146,14 @@ export default function CoursesScreen() {
                   <Text style={[styles.groupSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
                     {count}/{item.maxStudents} o'quvchi {item.room ? `· ${item.room}` : ""}
                   </Text>
+                  {teacher && (
+                    <View style={styles.teacherTag}>
+                      <Ionicons name="school-outline" size={11} color={colors.secondary} />
+                      <Text style={[styles.teacherTagText, { color: colors.secondary, fontFamily: "Inter_500Medium" }]}>
+                        {teacher.name}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
               </TouchableOpacity>
@@ -186,6 +195,7 @@ export default function CoursesScreen() {
       {/* Group Modal */}
       <ModalSheet visible={showGroupModal} onClose={() => setShowGroupModal(false)} title={editingGroup ? "Guruhni tahrirlash" : "Yangi guruh"}>
         <FormField label="Guruh nomi *" value={groupForm.name} onChangeText={v => setGroupForm(p => ({ ...p, name: v }))} placeholder="masalan: Mat-A" />
+
         <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Kurs</Text>
         <View style={styles.selectorRow}>
           {courses.map(c => (
@@ -194,6 +204,45 @@ export default function CoursesScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>O'qituvchi</Text>
+        {teachers.length === 0 ? (
+          <View style={[styles.noTeacherBox, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+            <Ionicons name="information-circle-outline" size={16} color={colors.mutedForeground} />
+            <Text style={[styles.noTeacherText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              Avval Sozlamalar → O'qituvchi qo'shing
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.selectorRow}>
+            {teachers.map(t => {
+              const isSelected = groupForm.teacherId === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.teacherChip, { backgroundColor: isSelected ? colors.secondary : colors.muted, borderWidth: isSelected ? 0 : 1, borderColor: colors.border }]}
+                  onPress={() => setGroupForm(p => ({ ...p, teacherId: t.id }))}
+                >
+                  <View style={[styles.teacherChipAvatar, { backgroundColor: isSelected ? "rgba(255,255,255,0.2)" : colors.background }]}>
+                    <Text style={[styles.teacherChipInitials, { color: isSelected ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_700Bold" }]}>
+                      {t.name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase()}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={[styles.teacherChipName, { color: isSelected ? "#FFFFFF" : colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+                      {t.name.split(" ")[0]}
+                    </Text>
+                    <Text style={[styles.teacherChipSub, { color: isSelected ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                      {t.salaryType === "percentage" ? `${t.salaryPercent}% foiz` : "O'zgarmas"}
+                    </Text>
+                  </View>
+                  {isSelected && <Ionicons name="checkmark-circle" size={16} color="rgba(255,255,255,0.9)" style={{ marginLeft: "auto" }} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         <FormField label="Dars vaqti" value={groupForm.schedule} onChangeText={v => setGroupForm(p => ({ ...p, schedule: v }))} placeholder="Du-Cho-Ju, 09:00" />
         <FormField label="Xona" value={groupForm.room} onChangeText={v => setGroupForm(p => ({ ...p, room: v }))} placeholder="201-xona" />
         <FormField label="Max o'quvchi soni" value={groupForm.maxStudents} onChangeText={v => setGroupForm(p => ({ ...p, maxStudents: v }))} keyboardType="numeric" />
@@ -223,12 +272,21 @@ const styles = StyleSheet.create({
   groupDot: { width: 12, height: 12, borderRadius: 6 },
   groupName: { fontSize: 15, marginBottom: 2 },
   groupSub: { fontSize: 13 },
+  teacherTag: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  teacherTagText: { fontSize: 12 },
   pickerLabel: { fontSize: 13, marginBottom: 8, marginTop: 4 },
   colorRow: { flexDirection: "row", gap: 10, marginBottom: 20, flexWrap: "wrap" },
   colorDot: { width: 32, height: 32, borderRadius: 16 },
   selectorRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   selectorChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
   selectorText: { fontSize: 13 },
+  noTeacherBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 16 },
+  noTeacherText: { fontSize: 13, flex: 1 },
+  teacherChip: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, width: "100%", marginBottom: 4 },
+  teacherChipAvatar: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  teacherChipInitials: { fontSize: 13 },
+  teacherChipName: { fontSize: 14 },
+  teacherChipSub: { fontSize: 11 },
   saveBtn: { paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 8 },
   saveBtnText: { color: "#FFFFFF", fontSize: 16 },
   deleteBtn: { paddingVertical: 14, borderRadius: 14, alignItems: "center", marginTop: 8, borderWidth: 1 },

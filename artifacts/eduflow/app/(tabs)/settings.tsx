@@ -45,17 +45,21 @@ const EMPTY_FORM = {
   status: "active" as "active" | "inactive",
 };
 
-// O'qituvchi foizli maoshi bo'lsa, uning kurslariga oid to'langan summadan hisoblash
+// O'qituvchi foizli maoshi: uning GURUHLARIDAGI o'quvchilar to'lagan summadan hisoblash
+// Zanjir: o'qituvchi → guruhlar → o'quvchilar → to'lovlar
 function calcPercentEarnings(
   teacher: Teacher,
   payments: ReturnType<typeof useApp>["payments"],
   students: ReturnType<typeof useApp>["students"],
-  courses: ReturnType<typeof useApp>["courses"],
+  groups: ReturnType<typeof useApp>["groups"],
   currentMonth: string
 ): number {
   if (teacher.salaryType !== "percentage" || !teacher.salaryPercent) return 0;
-  const teacherCourseIds = courses.filter((c) => c.teacherId === teacher.id).map((c) => c.id);
-  const teacherStudentIds = students.filter((s) => teacherCourseIds.includes(s.courseId)).map((s) => s.id);
+  // 1) shu o'qituvchiga tegishli guruhlar
+  const teacherGroupIds = groups.filter((g) => g.teacherId === teacher.id).map((g) => g.id);
+  // 2) shu guruhlardagi o'quvchilar
+  const teacherStudentIds = students.filter((s) => teacherGroupIds.includes(s.groupId)).map((s) => s.id);
+  // 3) shu oy to'langan summalar
   const paid = payments
     .filter((p) => teacherStudentIds.includes(p.studentId) && p.status === "paid" && p.month === currentMonth)
     .reduce((sum, p) => sum + p.amount, 0);
@@ -67,8 +71,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
   const colorScheme = useColorScheme();
-  const { user, setUser, students, courses, groups, payments, teachers, addTeacher, updateTeacher, deleteTeacher } =
-    useApp();
+  const { user, setUser, students, courses, groups, payments, teachers, addTeacher, updateTeacher, deleteTeacher } = useApp();
 
   const isAdmin = (user?.role ?? "admin") === "admin";
   const currentMonth = new Date().toISOString().slice(0, 7); // "2026-07"
@@ -160,7 +163,7 @@ export default function SettingsScreen() {
       return t.salary ? `Oylik: ${t.salary.toLocaleString()} so'm` : "Oylik belgilanmagan";
     }
     if (!t.salaryPercent) return "Foiz belgilanmagan";
-    const earned = calcPercentEarnings(t, payments, students, courses, currentMonth);
+    const earned = calcPercentEarnings(t, payments, students, groups, currentMonth);
     return `${t.salaryPercent}% · Bu oy: ${earned.toLocaleString()} so'm`;
   }
 

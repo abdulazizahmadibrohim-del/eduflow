@@ -1,8 +1,13 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "B7bcO1obeYS7LrOZGJY83"
 uri = "file://artifacts/eduflow/assets/images/icon.png"
 type = "image"
 title = "generated_image"
+
+[[outputs]]
+id = "PN4vZpsWTb1cfyNRI18NM"
+uri = "file://artifacts/eduflow/dist.zip"
+type = "unspecified"
+title = "EduFlow Web (Vercel uchun)"

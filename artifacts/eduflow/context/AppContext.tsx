@@ -11,12 +11,16 @@ export interface AppUser {
   phone: string;
 }
 
+export type SalaryType = "fixed" | "percentage";
+
 export interface Teacher {
   id: string;
   name: string;
   phone: string;
   subject: string;
-  salary?: number;
+  salaryType: SalaryType;
+  salary?: number;       // agar salaryType === "fixed" bo'lsa — oylik summa (so'm)
+  salaryPercent?: number; // agar salaryType === "percentage" bo'lsa — foiz (0–100)
   status: "active" | "inactive";
   joinedAt: string;
 }
@@ -107,8 +111,8 @@ function genId(): string {
 }
 
 const SAMPLE_TEACHERS: Teacher[] = [
-  { id: "t1", name: "Rahimov Bobur", phone: "+998901110001", subject: "Matematika", salary: 2000000, status: "active", joinedAt: "2025-09-01" },
-  { id: "t2", name: "Yusupova Dilnoza", phone: "+998901110002", subject: "Ingliz tili", salary: 1800000, status: "active", joinedAt: "2025-10-01" },
+  { id: "t1", name: "Rahimov Bobur", phone: "+998901110001", subject: "Matematika", salaryType: "fixed", salary: 2000000, status: "active", joinedAt: "2025-09-01" },
+  { id: "t2", name: "Yusupova Dilnoza", phone: "+998901110002", subject: "Ingliz tili", salaryType: "percentage", salaryPercent: 40, status: "active", joinedAt: "2025-10-01" },
 ];
 
 const SAMPLE_COURSES: Course[] = [

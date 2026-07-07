@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FormField } from "@/components/ui/FormField";
 import { ModalSheet } from "@/components/ui/ModalSheet";
-import { useApp, type Teacher, type UserRole } from "@/context/AppContext";
+import { useApp, type SalaryType, type Teacher, type UserRole } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 
 const SUBJECT_COLORS: Record<string, string> = {
@@ -32,79 +32,105 @@ function subjectColor(subject: string) {
 }
 
 function initials(name: string) {
-  return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-const EMPTY_TEACHER = { name: "", phone: "", subject: "", salary: "", status: "active" as "active" | "inactive" };
+const EMPTY_FORM = {
+  name: "",
+  phone: "",
+  subject: "",
+  salaryType: "fixed" as SalaryType,
+  salary: "",
+  salaryPercent: "",
+  status: "active" as "active" | "inactive",
+};
+
+// O'qituvchi foizli maoshi bo'lsa, uning kurslariga oid to'langan summadan hisoblash
+function calcPercentEarnings(
+  teacher: Teacher,
+  payments: ReturnType<typeof useApp>["payments"],
+  students: ReturnType<typeof useApp>["students"],
+  courses: ReturnType<typeof useApp>["courses"],
+  currentMonth: string
+): number {
+  if (teacher.salaryType !== "percentage" || !teacher.salaryPercent) return 0;
+  const teacherCourseIds = courses.filter((c) => c.teacherId === teacher.id).map((c) => c.id);
+  const teacherStudentIds = students.filter((s) => teacherCourseIds.includes(s.courseId)).map((s) => s.id);
+  const paid = payments
+    .filter((p) => teacherStudentIds.includes(p.studentId) && p.status === "paid" && p.month === currentMonth)
+    .reduce((sum, p) => sum + p.amount, 0);
+  return Math.round((paid * teacher.salaryPercent) / 100);
+}
 
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
   const colorScheme = useColorScheme();
-  const { user, setUser, students, courses, groups, payments, teachers, addTeacher, updateTeacher, deleteTeacher } = useApp();
+  const { user, setUser, students, courses, groups, payments, teachers, addTeacher, updateTeacher, deleteTeacher } =
+    useApp();
 
   const isAdmin = (user?.role ?? "admin") === "admin";
+  const currentMonth = new Date().toISOString().slice(0, 7); // "2026-07"
 
   // Profile modal
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    name: user?.name ?? "",
-    phone: user?.phone ?? "",
-    centerName: user?.centerName ?? "",
-  });
+  const [profileForm, setProfileForm] = useState({ name: user?.name ?? "", phone: user?.phone ?? "", centerName: user?.centerName ?? "" });
 
   // Teacher modal
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
-  const [teacherForm, setTeacherForm] = useState(EMPTY_TEACHER);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const openAddTeacher = () => {
+  const openAdd = () => {
     setEditingTeacher(null);
-    setTeacherForm(EMPTY_TEACHER);
+    setForm(EMPTY_FORM);
     setShowTeacherModal(true);
   };
 
-  const openEditTeacher = (t: Teacher) => {
+  const openEdit = (t: Teacher) => {
     setEditingTeacher(t);
-    setTeacherForm({ name: t.name, phone: t.phone, subject: t.subject, salary: t.salary?.toString() ?? "", status: t.status });
+    setForm({
+      name: t.name,
+      phone: t.phone,
+      subject: t.subject,
+      salaryType: t.salaryType,
+      salary: t.salary?.toString() ?? "",
+      salaryPercent: t.salaryPercent?.toString() ?? "",
+      status: t.status,
+    });
     setShowTeacherModal(true);
   };
 
   const saveTeacher = () => {
-    if (!teacherForm.name.trim() || !teacherForm.subject.trim()) return;
-    const data = {
-      name: teacherForm.name.trim(),
-      phone: teacherForm.phone.trim(),
-      subject: teacherForm.subject.trim(),
-      salary: teacherForm.salary ? parseInt(teacherForm.salary.replace(/\D/g, ""), 10) : undefined,
-      status: teacherForm.status,
+    if (!form.name.trim() || !form.subject.trim()) return;
+    const base = {
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      subject: form.subject.trim(),
+      salaryType: form.salaryType,
+      salary: form.salaryType === "fixed" && form.salary ? parseInt(form.salary.replace(/\D/g, ""), 10) : undefined,
+      salaryPercent: form.salaryType === "percentage" && form.salaryPercent ? parseFloat(form.salaryPercent) : undefined,
+      status: form.status,
     };
     if (editingTeacher) {
-      updateTeacher(editingTeacher.id, data);
+      updateTeacher(editingTeacher.id, base);
     } else {
-      addTeacher(data);
+      addTeacher(base);
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowTeacherModal(false);
   };
 
-  const confirmDeleteTeacher = (t: Teacher) => {
-    Alert.alert(
-      "O'chirishni tasdiqlang",
-      `${t.name} o'qituvchini o'chirmoqchimisiz?`,
-      [
-        { text: "Bekor qilish", style: "cancel" },
-        {
-          text: "O'chirish",
-          style: "destructive",
-          onPress: () => {
-            deleteTeacher(t.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          },
-        },
-      ]
-    );
+  const confirmDelete = (t: Teacher) => {
+    Alert.alert("O'chirishni tasdiqlang", `${t.name} o'qituvchini o'chirmoqchimisiz?`, [
+      { text: "Bekor qilish", style: "cancel" },
+      {
+        text: "O'chirish",
+        style: "destructive",
+        onPress: () => { deleteTeacher(t.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); },
+      },
+    ]);
   };
 
   const openProfile = () => {
@@ -123,10 +149,20 @@ export default function SettingsScreen() {
     students: students.length,
     courses: courses.length,
     groups: groups.length,
-    revenue: payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0),
+    revenue: payments.filter((p) => p.status === "paid").reduce((s, p) => s + p.amount, 0),
   };
 
   const topPadding = isWeb ? 67 : insets.top;
+
+  // Maosh ko'rsatish matni
+  function salaryLabel(t: Teacher): string {
+    if (t.salaryType === "fixed") {
+      return t.salary ? `Oylik: ${t.salary.toLocaleString()} so'm` : "Oylik belgilanmagan";
+    }
+    if (!t.salaryPercent) return "Foiz belgilanmagan";
+    const earned = calcPercentEarnings(t, payments, students, courses, currentMonth);
+    return `${t.salaryPercent}% · Bu oy: ${earned.toLocaleString()} so'm`;
+  }
 
   return (
     <>
@@ -136,21 +172,14 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Card */}
-        <TouchableOpacity
-          style={[styles.profileCard, { backgroundColor: colors.primary }]}
-          onPress={openProfile}
-          activeOpacity={0.9}
-        >
+        <TouchableOpacity style={[styles.profileCard, { backgroundColor: colors.primary }]} onPress={openProfile} activeOpacity={0.9}>
           <View style={styles.profileAvatar}>
             <Ionicons name="person" size={36} color={colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.profileName, { fontFamily: "Inter_700Bold" }]}>
-              {user?.name || "Foydalanuvchi"}
-            </Text>
+            <Text style={[styles.profileName, { fontFamily: "Inter_700Bold" }]}>{user?.name || "Foydalanuvchi"}</Text>
             <Text style={[styles.profileRole, { fontFamily: "Inter_400Regular" }]}>
-              {isAdmin ? "Administrator" : "O'qituvchi"}
-              {user?.centerName ? ` · ${user.centerName}` : ""}
+              {isAdmin ? "Administrator" : "O'qituvchi"}{user?.centerName ? ` · ${user.centerName}` : ""}
             </Text>
           </View>
           <Ionicons name="pencil" size={18} color="rgba(255,255,255,0.7)" />
@@ -158,16 +187,14 @@ export default function SettingsScreen() {
 
         {/* Statistics */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
-            Statistika
-          </Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>Statistika</Text>
           <View style={styles.statsGrid}>
             {[
               { label: "O'qituvchilar", value: stats.teachers, icon: "school-outline" as const, color: colors.secondary },
               { label: "O'quvchilar", value: stats.students, icon: "people-outline" as const, color: colors.primary },
               { label: "Kurslar", value: stats.courses, icon: "book-outline" as const, color: "#F59E0B" },
               { label: "Guruhlar", value: stats.groups, icon: "grid-outline" as const, color: "#10B981" },
-            ].map(s => (
+            ].map((s) => (
               <View key={s.label} style={[styles.statItem, { borderColor: colors.border }]}>
                 <Ionicons name={s.icon} size={20} color={s.color} />
                 <Text style={[styles.statValue, { color: colors.foreground, fontFamily: "Inter_700Bold" }]}>{s.value}</Text>
@@ -187,17 +214,13 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>Rol</Text>
           <View style={styles.roleRow}>
-            {(["admin", "teacher"] as UserRole[]).map(r => (
+            {(["admin", "teacher"] as UserRole[]).map((r) => (
               <TouchableOpacity
                 key={r}
                 style={[styles.roleChip, { backgroundColor: (user?.role ?? "admin") === r ? colors.primary : colors.muted }]}
                 onPress={() => { setUser({ ...(user ?? { id: "u1", name: "", phone: "" }), role: r }); Haptics.selectionAsync(); }}
               >
-                <Ionicons
-                  name={r === "admin" ? "shield-checkmark" : "school"}
-                  size={16}
-                  color={(user?.role ?? "admin") === r ? "#FFFFFF" : colors.mutedForeground}
-                />
+                <Ionicons name={r === "admin" ? "shield-checkmark" : "school"} size={16} color={(user?.role ?? "admin") === r ? "#FFFFFF" : colors.mutedForeground} />
                 <Text style={[styles.roleText, { color: (user?.role ?? "admin") === r ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
                   {r === "admin" ? "Administrator" : "O'qituvchi"}
                 </Text>
@@ -210,13 +233,10 @@ export default function SettingsScreen() {
         {isAdmin && (
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold", padding: 0 }]}>
                 O'qituvchilar
               </Text>
-              <TouchableOpacity
-                style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                onPress={openAddTeacher}
-              >
+              <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={openAdd}>
                 <Ionicons name="add" size={18} color="#FFFFFF" />
                 <Text style={[styles.addBtnText, { fontFamily: "Inter_600SemiBold" }]}>Qo'shish</Text>
               </TouchableOpacity>
@@ -225,61 +245,48 @@ export default function SettingsScreen() {
             {teachers.length === 0 ? (
               <View style={styles.emptyTeachers}>
                 <Ionicons name="school-outline" size={36} color={colors.mutedForeground} />
-                <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-                  Hali o'qituvchi yo'q
-                </Text>
+                <Text style={[styles.emptyText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>Hali o'qituvchi yo'q</Text>
               </View>
             ) : (
               teachers.map((t, i) => (
-                <View
-                  key={t.id}
-                  style={[
-                    styles.teacherRow,
-                    { borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border },
-                  ]}
-                >
-                  {/* Avatar */}
+                <View key={t.id} style={[styles.teacherRow, { borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border }]}>
                   <View style={[styles.teacherAvatar, { backgroundColor: subjectColor(t.subject) + "20" }]}>
                     <Text style={[styles.teacherInitials, { color: subjectColor(t.subject), fontFamily: "Inter_700Bold" }]}>
                       {initials(t.name)}
                     </Text>
                   </View>
-
-                  {/* Info */}
                   <View style={{ flex: 1 }}>
                     <View style={styles.teacherNameRow}>
-                      <Text style={[styles.teacherName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
-                        {t.name}
-                      </Text>
+                      <Text style={[styles.teacherName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>{t.name}</Text>
                       <View style={[styles.statusDot, { backgroundColor: t.status === "active" ? "#10B981" : "#EF4444" }]} />
                     </View>
-                    <Text style={[styles.teacherSubject, { color: subjectColor(t.subject), fontFamily: "Inter_500Medium" }]}>
-                      {t.subject}
-                    </Text>
+                    <Text style={[styles.teacherSubject, { color: subjectColor(t.subject), fontFamily: "Inter_500Medium" }]}>{t.subject}</Text>
                     {t.phone ? (
-                      <Text style={[styles.teacherPhone, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-                        {t.phone}
-                      </Text>
+                      <Text style={[styles.teacherMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{t.phone}</Text>
                     ) : null}
-                    {t.salary ? (
-                      <Text style={[styles.teacherSalary, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-                        Maosh: {t.salary.toLocaleString()} so'm
-                      </Text>
-                    ) : null}
-                  </View>
 
-                  {/* Actions */}
+                    {/* Maosh ko'rsatish */}
+                    <View style={[styles.salaryBadge, {
+                      backgroundColor: t.salaryType === "percentage" ? colors.secondary + "15" : colors.primary + "12",
+                    }]}>
+                      <Ionicons
+                        name={t.salaryType === "percentage" ? "pie-chart-outline" : "cash-outline"}
+                        size={11}
+                        color={t.salaryType === "percentage" ? colors.secondary : colors.primary}
+                      />
+                      <Text style={[styles.salaryBadgeText, {
+                        color: t.salaryType === "percentage" ? colors.secondary : colors.primary,
+                        fontFamily: "Inter_500Medium",
+                      }]}>
+                        {salaryLabel(t)}
+                      </Text>
+                    </View>
+                  </View>
                   <View style={styles.teacherActions}>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: colors.muted }]}
-                      onPress={() => openEditTeacher(t)}
-                    >
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.muted }]} onPress={() => openEdit(t)}>
                       <Ionicons name="pencil" size={15} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: "#EF444418" }]}
-                      onPress={() => confirmDeleteTeacher(t)}
-                    >
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#EF444418" }]} onPress={() => confirmDelete(t)}>
                       <Ionicons name="trash-outline" size={15} color="#EF4444" />
                     </TouchableOpacity>
                   </View>
@@ -297,10 +304,7 @@ export default function SettingsScreen() {
             { label: "Platform", value: Platform.OS === "ios" ? "iOS" : Platform.OS === "android" ? "Android" : "Web", icon: "phone-portrait-outline" as const, color: colors.secondary },
             { label: "Mavzu", value: colorScheme === "dark" ? "Qorong'u" : "Yorug'", icon: "color-palette-outline" as const, color: "#10B981" },
           ].map((item, i, arr) => (
-            <View
-              key={item.label}
-              style={[styles.infoRow, { borderBottomWidth: i < arr.length - 1 ? 0.5 : 0, borderBottomColor: colors.border }]}
-            >
+            <View key={item.label} style={[styles.infoRow, { borderBottomWidth: i < arr.length - 1 ? 0.5 : 0, borderBottomColor: colors.border }]}>
               <View style={[styles.infoIcon, { backgroundColor: item.color + "18" }]}>
                 <Ionicons name={item.icon} size={20} color={item.color} />
               </View>
@@ -313,9 +317,9 @@ export default function SettingsScreen() {
 
       {/* Profile Modal */}
       <ModalSheet visible={showProfileModal} onClose={() => setShowProfileModal(false)} title="Profilni tahrirlash">
-        <FormField label="To'liq ism" value={profileForm.name} onChangeText={v => setProfileForm(p => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
-        <FormField label="Telefon" value={profileForm.phone} onChangeText={v => setProfileForm(p => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
-        <FormField label="O'quv markaz nomi" value={profileForm.centerName} onChangeText={v => setProfileForm(p => ({ ...p, centerName: v }))} placeholder="masalan: Najot Ta'lim" />
+        <FormField label="To'liq ism" value={profileForm.name} onChangeText={(v) => setProfileForm((p) => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
+        <FormField label="Telefon" value={profileForm.phone} onChangeText={(v) => setProfileForm((p) => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
+        <FormField label="O'quv markaz nomi" value={profileForm.centerName} onChangeText={(v) => setProfileForm((p) => ({ ...p, centerName: v }))} placeholder="masalan: Najot Ta'lim" />
         <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={saveProfile} activeOpacity={0.85}>
           <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>Saqlash</Text>
         </TouchableOpacity>
@@ -327,47 +331,109 @@ export default function SettingsScreen() {
         onClose={() => setShowTeacherModal(false)}
         title={editingTeacher ? "O'qituvchini tahrirlash" : "O'qituvchi qo'shish"}
       >
-        <FormField
-          label="To'liq ism *"
-          value={teacherForm.name}
-          onChangeText={v => setTeacherForm(p => ({ ...p, name: v }))}
-          placeholder="Ism Familiya"
-          autoCapitalize="words"
-        />
-        <FormField
-          label="Fan / Yo'nalish *"
-          value={teacherForm.subject}
-          onChangeText={v => setTeacherForm(p => ({ ...p, subject: v }))}
-          placeholder="masalan: Matematika"
-          autoCapitalize="words"
-        />
-        <FormField
-          label="Telefon raqami"
-          value={teacherForm.phone}
-          onChangeText={v => setTeacherForm(p => ({ ...p, phone: v }))}
-          placeholder="+998 90 000 00 00"
-          keyboardType="phone-pad"
-        />
-        <FormField
-          label="Oylik maosh (so'm)"
-          value={teacherForm.salary}
-          onChangeText={v => setTeacherForm(p => ({ ...p, salary: v }))}
-          placeholder="masalan: 2000000"
-          keyboardType="numeric"
-          suffix="so'm"
-        />
+        <FormField label="To'liq ism *" value={form.name} onChangeText={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="Ism Familiya" autoCapitalize="words" />
+        <FormField label="Fan / Yo'nalish *" value={form.subject} onChangeText={(v) => setForm((p) => ({ ...p, subject: v }))} placeholder="masalan: Matematika" autoCapitalize="words" />
+        <FormField label="Telefon raqami" value={form.phone} onChangeText={(v) => setForm((p) => ({ ...p, phone: v }))} placeholder="+998 90 000 00 00" keyboardType="phone-pad" />
 
-        {/* Status toggle */}
-        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Holat</Text>
+        {/* Maosh turi tanlash */}
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Maosh turi</Text>
+        <View style={styles.segmentRow}>
+          <TouchableOpacity
+            style={[
+              styles.segment,
+              styles.segmentLeft,
+              {
+                backgroundColor: form.salaryType === "fixed" ? colors.primary : colors.muted,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => setForm((p) => ({ ...p, salaryType: "fixed" }))}
+          >
+            <Ionicons name="cash-outline" size={16} color={form.salaryType === "fixed" ? "#FFFFFF" : colors.mutedForeground} />
+            <Text style={[styles.segmentText, { color: form.salaryType === "fixed" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
+              O'zgarmas
+            </Text>
+            <Text style={[styles.segmentSub, { color: form.salaryType === "fixed" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              Oylik summa
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.segment,
+              styles.segmentRight,
+              {
+                backgroundColor: form.salaryType === "percentage" ? colors.secondary : colors.muted,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={() => setForm((p) => ({ ...p, salaryType: "percentage" }))}
+          >
+            <Ionicons name="pie-chart-outline" size={16} color={form.salaryType === "percentage" ? "#FFFFFF" : colors.mutedForeground} />
+            <Text style={[styles.segmentText, { color: form.salaryType === "percentage" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
+              Foizli
+            </Text>
+            <Text style={[styles.segmentSub, { color: form.salaryType === "percentage" ? "rgba(255,255,255,0.75)" : colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              To'lovdan %
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* O'zgarmas summa */}
+        {form.salaryType === "fixed" && (
+          <FormField
+            label="Oylik maosh"
+            value={form.salary}
+            onChangeText={(v) => setForm((p) => ({ ...p, salary: v }))}
+            placeholder="masalan: 2000000"
+            keyboardType="numeric"
+            suffix="so'm"
+          />
+        )}
+
+        {/* Foizli maosh */}
+        {form.salaryType === "percentage" && (
+          <>
+            <FormField
+              label="O'quvchi to'lovidan foiz"
+              value={form.salaryPercent}
+              onChangeText={(v) => {
+                const n = parseFloat(v);
+                if (v === "" || (n >= 0 && n <= 100)) setForm((p) => ({ ...p, salaryPercent: v }));
+              }}
+              placeholder="masalan: 40"
+              keyboardType="numeric"
+              suffix="%"
+            />
+            {/* Misol hisob */}
+            {form.salaryPercent ? (
+              <View style={[styles.exampleBox, { backgroundColor: colors.secondary + "12", borderColor: colors.secondary + "30" }]}>
+                <Ionicons name="calculator-outline" size={16} color={colors.secondary} />
+                <Text style={[styles.exampleText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
+                  Misol: O'quvchi 400,000 so'm to'lasa → o'qituvchi{" "}
+                  <Text style={{ fontFamily: "Inter_600SemiBold" }}>
+                    {form.salaryPercent
+                      ? Math.round((400000 * parseFloat(form.salaryPercent || "0")) / 100).toLocaleString()
+                      : "0"}{" "}
+                    so'm
+                  </Text>{" "}
+                  oladi
+                </Text>
+              </View>
+            ) : null}
+          </>
+        )}
+
+        {/* Holat */}
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 4 }]}>Holat</Text>
         <View style={[styles.roleRow, { marginBottom: 20 }]}>
-          {(["active", "inactive"] as const).map(s => (
+          {(["active", "inactive"] as const).map((s) => (
             <TouchableOpacity
               key={s}
-              style={[styles.roleChip, { backgroundColor: teacherForm.status === s ? (s === "active" ? "#10B981" : "#EF4444") : colors.muted }]}
-              onPress={() => setTeacherForm(p => ({ ...p, status: s }))}
+              style={[styles.roleChip, { backgroundColor: form.status === s ? (s === "active" ? "#10B981" : "#EF4444") : colors.muted }]}
+              onPress={() => setForm((p) => ({ ...p, status: s }))}
             >
-              <Ionicons name={s === "active" ? "checkmark-circle" : "close-circle"} size={16} color={teacherForm.status === s ? "#FFFFFF" : colors.mutedForeground} />
-              <Text style={[styles.roleText, { color: teacherForm.status === s ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+              <Ionicons name={s === "active" ? "checkmark-circle" : "close-circle"} size={16} color={form.status === s ? "#FFFFFF" : colors.mutedForeground} />
+              <Text style={[styles.roleText, { color: form.status === s ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
                 {s === "active" ? "Faol" : "Faol emas"}
               </Text>
             </TouchableOpacity>
@@ -375,10 +441,10 @@ export default function SettingsScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: !teacherForm.name.trim() || !teacherForm.subject.trim() ? colors.muted : colors.primary }]}
+          style={[styles.saveBtn, { backgroundColor: !form.name.trim() || !form.subject.trim() ? colors.muted : colors.primary }]}
           onPress={saveTeacher}
           activeOpacity={0.85}
-          disabled={!teacherForm.name.trim() || !teacherForm.subject.trim()}
+          disabled={!form.name.trim() || !form.subject.trim()}
         >
           <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>
             {editingTeacher ? "Saqlash" : "Qo'shish"}
@@ -417,9 +483,10 @@ const styles = StyleSheet.create({
   teacherNameRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 },
   teacherName: { fontSize: 15 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
-  teacherSubject: { fontSize: 13, marginBottom: 1 },
-  teacherPhone: { fontSize: 12, marginTop: 1 },
-  teacherSalary: { fontSize: 12 },
+  teacherSubject: { fontSize: 13, marginBottom: 2 },
+  teacherMeta: { fontSize: 12, marginBottom: 3 },
+  salaryBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: "flex-start" },
+  salaryBadgeText: { fontSize: 11 },
   teacherActions: { flexDirection: "row", gap: 8 },
   actionBtn: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   emptyTeachers: { alignItems: "center", paddingVertical: 32, gap: 8 },
@@ -428,7 +495,16 @@ const styles = StyleSheet.create({
   infoIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   infoLabel: { flex: 1, fontSize: 15 },
   infoValue: { fontSize: 14 },
+  // Form
+  fieldLabel: { fontSize: 13, marginBottom: 8 },
+  segmentRow: { flexDirection: "row", marginBottom: 18, gap: 0 },
+  segment: { flex: 1, alignItems: "center", paddingVertical: 14, gap: 3, borderWidth: 1 },
+  segmentLeft: { borderRadius: 12, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  segmentRight: { borderRadius: 12, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 },
+  segmentText: { fontSize: 14 },
+  segmentSub: { fontSize: 11 },
+  exampleBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 16 },
+  exampleText: { flex: 1, fontSize: 13, lineHeight: 18 },
   saveBtn: { paddingVertical: 15, borderRadius: 14, alignItems: "center", marginTop: 4 },
   saveBtnText: { color: "#FFFFFF", fontSize: 16 },
-  fieldLabel: { fontSize: 13, marginBottom: 6 },
 });

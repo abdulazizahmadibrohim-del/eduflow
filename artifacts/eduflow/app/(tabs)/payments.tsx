@@ -18,7 +18,20 @@ export default function PaymentsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
-  const { students, courses, groups, payments, addPayment, updatePayment, addTransaction } = useApp();
+  const { user, students, courses, groups, payments, addPayment, addTransaction } = useApp();
+
+  const isAdmin = (user?.role ?? "admin") === "admin";
+  const isTeacher = user?.role === "teacher";
+
+  const myGroupIds = useMemo(() => {
+    if (!isTeacher || !user?.teacherId) return groups.map(g => g.id);
+    return groups.filter(g => g.teacherId === user.teacherId).map(g => g.id);
+  }, [isTeacher, user, groups]);
+
+  const myStudentIds = useMemo(() => {
+    if (!isTeacher) return students.map(s => s.id);
+    return students.filter(s => myGroupIds.includes(s.groupId)).map(s => s.id);
+  }, [isTeacher, students, myGroupIds]);
 
   const [filter, setFilter] = useState<"all" | "paid" | "pending" | "overdue" | "partial">("all");
   const [groupFilter, setGroupFilter] = useState<string>("all");
@@ -36,29 +49,48 @@ export default function PaymentsScreen() {
 
   const currentMonth = new Date().toISOString().slice(0, 7);
 
+  const visibleGroups = useMemo(() => {
+    if (!isTeacher || !user?.teacherId) return groups;
+    return groups.filter(g => g.teacherId === user.teacherId);
+  }, [isTeacher, user, groups]);
+
   const monthStats = useMemo(() => {
-    const mp = payments.filter(p => p.month === currentMonth);
+    const mp = payments.filter(p => p.month === currentMonth && myStudentIds.includes(p.studentId));
     const paid = mp.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
     const pending = mp.filter(p => p.status === "pending").reduce((s, p) => s + p.amount, 0);
     const overdue = mp.filter(p => p.status === "overdue").reduce((s, p) => s + p.amount, 0);
     return { paid, pending, overdue };
-  }, [payments, currentMonth]);
+  }, [payments, currentMonth, myStudentIds]);
 
   const filtered = useMemo(() => {
     return payments.filter(p => {
       const student = students.find(s => s.id === p.studentId);
+      const inMyStudents = myStudentIds.includes(p.studentId);
       const matchStatus = filter === "all" || p.status === filter;
       const matchGroup = groupFilter === "all" || student?.groupId === groupFilter;
       const matchSearch = !search || student?.name.toLowerCase().includes(search.toLowerCase()) || student?.phone.includes(search);
-      return matchStatus && matchGroup && matchSearch;
+      return inMyStudents && matchStatus && matchGroup && matchSearch;
     }).sort((a, b) => {
       const order = { overdue: 0, partial: 1, pending: 2, paid: 3 };
       return (order[a.status] ?? 2) - (order[b.status] ?? 2);
     });
-  }, [payments, students, filter, groupFilter, search]);
+  }, [payments, students, filter, groupFilter, search, myStudentIds]);
+
+  const visibleStudents = useMemo(() => {
+    return students.filter(s => myStudentIds.includes(s.id));
+  }, [students, myStudentIds]);
 
   const openAdd = () => {
-    setForm({ studentId: students[0]?.id ?? "", amount: "", month: currentMonth, status: "pending", note: "", method: "cash" });
+    const firstStudent = visibleStudents[0];
+    const course = courses.find(c => c.id === firstStudent?.courseId);
+    setForm({
+      studentId: firstStudent?.id ?? "",
+      amount: course?.price.toString() ?? "",
+      month: currentMonth,
+      status: "pending",
+      note: "",
+      method: "cash",
+    });
     setShowModal(true);
   };
 
@@ -74,7 +106,7 @@ export default function PaymentsScreen() {
       amount: Number(form.amount),
       month: form.month,
       status: form.status,
-      note: form.note,
+      note: form.note || undefined,
       method: form.method,
       paidTotal: form.status === "paid" ? Number(form.amount) : 0,
       transactions: form.status === "paid" ? [{
@@ -88,16 +120,7 @@ export default function PaymentsScreen() {
     setShowModal(false);
   };
 
-  const handleMarkPaid = (paymentId: string) => {
-    const payment = payments.find(p => p.id === paymentId);
-    if (!payment) return;
-    setSelectedPaymentId(paymentId);
-    const remaining = payment.amount - (payment.paidTotal ?? 0);
-    setTxForm({ amount: remaining.toString(), method: "cash", note: "", receiptUri: "" });
-    setShowTxModal(true);
-  };
-
-  const handleAddTransaction = (paymentId: string) => {
+  const openTxModal = (paymentId: string) => {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment) return;
     setSelectedPaymentId(paymentId);
@@ -120,6 +143,7 @@ export default function PaymentsScreen() {
   };
 
   const pickReceipt = async () => {
+    if (Platform.OS === "web") return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images"],
       quality: 0.6,
@@ -156,9 +180,11 @@ export default function PaymentsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPadding + 8, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: "Inter_700Bold" }]}>To'lovlar</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={openAdd} activeOpacity={0.85}>
-          <Ionicons name="add" size={22} color="#FFFFFF" />
-        </TouchableOpacity>
+        {isAdmin && (
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={openAdd} activeOpacity={0.85}>
+            <Ionicons name="add" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Search */}
@@ -200,6 +226,16 @@ export default function PaymentsScreen() {
         </View>
       </View>
 
+      {/* Teacher read-only notice */}
+      {isTeacher && (
+        <View style={[styles.teacherNotice, { backgroundColor: colors.secondary + "12", borderColor: colors.secondary + "25" }]}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.secondary} />
+          <Text style={[styles.teacherNoticeText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
+            Siz faqat o'z o'quvchilaringiz to'lovlarini ko'ra olasiz. To'lov qo'shish — admin huquqi.
+          </Text>
+        </View>
+      )}
+
       {/* Status filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
         {FILTERS.map(f => (
@@ -216,7 +252,7 @@ export default function PaymentsScreen() {
       </ScrollView>
 
       {/* Group filter */}
-      {groups.length > 0 && (
+      {visibleGroups.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
           <TouchableOpacity
             style={[styles.groupChip, { backgroundColor: groupFilter === "all" ? colors.secondary : colors.muted }]}
@@ -226,7 +262,7 @@ export default function PaymentsScreen() {
               Barcha guruhlar
             </Text>
           </TouchableOpacity>
-          {groups.map(g => (
+          {visibleGroups.map(g => (
             <TouchableOpacity
               key={g.id}
               style={[styles.groupChip, { backgroundColor: groupFilter === g.id ? colors.secondary : colors.muted }]}
@@ -247,99 +283,112 @@ export default function PaymentsScreen() {
           <PaymentCard
             payment={item}
             student={students.find(s => s.id === item.studentId)}
-            onMarkPaid={() => handleMarkPaid(item.id)}
-            onAddTransaction={() => handleAddTransaction(item.id)}
+            onMarkPaid={isAdmin ? () => openTxModal(item.id) : undefined}
+            onAddTransaction={isAdmin ? () => openTxModal(item.id) : undefined}
           />
         )}
         contentContainerStyle={[styles.list, { paddingBottom: isWeb ? 34 + 80 : 80 }]}
         ListEmptyComponent={
-          <EmptyState icon="card-outline" title="To'lovlar yo'q" description="Hali hech qanday to'lov kiritilmagan" actionLabel="To'lov qo'shish" onAction={openAdd} />
+          <EmptyState
+            icon="card-outline"
+            title="To'lovlar yo'q"
+            description={isTeacher ? "Bu guruhda hali to'lov kiritilmagan" : "Hali hech qanday to'lov kiritilmagan"}
+            actionLabel={isAdmin ? "To'lov qo'shish" : undefined}
+            onAction={isAdmin ? openAdd : undefined}
+          />
         }
         showsVerticalScrollIndicator={false}
       />
 
-      {/* New Payment Modal */}
-      <ModalSheet visible={showModal} onClose={() => setShowModal(false)} title="Yangi to'lov">
-        <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>O'quvchi</Text>
-        <View style={styles.selectorColumn}>
-          {students.map(s => {
-            const course = courses.find(c => c.id === s.courseId);
-            return (
+      {/* New Payment Modal (admin only) */}
+      {isAdmin && (
+        <ModalSheet visible={showModal} onClose={() => setShowModal(false)} title="Yangi to'lov">
+          <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>O'quvchi</Text>
+          <View style={styles.selectorColumn}>
+            {visibleStudents.map(s => {
+              const course = courses.find(c => c.id === s.courseId);
+              return (
+                <TouchableOpacity
+                  key={s.id}
+                  style={[styles.studentRow, {
+                    backgroundColor: form.studentId === s.id ? colors.primary + "18" : colors.muted,
+                    borderColor: form.studentId === s.id ? colors.primary : "transparent",
+                    borderWidth: 1,
+                  }]}
+                  onPress={() => setForm(p => ({ ...p, studentId: s.id, amount: course?.price.toString() ?? p.amount }))}
+                >
+                  <View style={[styles.studentAvatar, { backgroundColor: course?.color ?? colors.primary }]}>
+                    <Text style={[styles.studentInitials, { fontFamily: "Inter_600SemiBold" }]}>
+                      {s.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.studentName, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>{s.name}</Text>
+                    <Text style={[styles.studentSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{course?.name}</Text>
+                  </View>
+                  {form.studentId === s.id && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                </TouchableOpacity>
+              );
+            })}
+            {visibleStudents.length === 0 && (
+              <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular", fontStyle: "italic" }]}>
+                O'quvchilar yo'q
+              </Text>
+            )}
+          </View>
+
+          <FormField label="Miqdor (so'm) *" value={form.amount} onChangeText={v => setForm(p => ({ ...p, amount: v }))} placeholder="350000" keyboardType="numeric" suffix="so'm" />
+          <FormField label="Oy (YYYY-MM)" value={form.month} onChangeText={v => setForm(p => ({ ...p, month: v }))} placeholder="2026-07" />
+          <FormField label="Izoh" value={form.note} onChangeText={v => setForm(p => ({ ...p, note: v }))} placeholder="Ixtiyoriy izoh" />
+
+          <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>To'lov usuli</Text>
+          <View style={styles.methodPickerRow}>
+            {(["cash", "card"] as const).map(m => (
               <TouchableOpacity
-                key={s.id}
-                style={[styles.studentRow, {
-                  backgroundColor: form.studentId === s.id ? colors.primary + "18" : colors.muted,
-                  borderColor: form.studentId === s.id ? colors.primary : "transparent",
-                  borderWidth: 1,
+                key={m}
+                style={[styles.methodChip, {
+                  backgroundColor: form.method === m ? (m === "cash" ? "#10B981" : colors.primary) : colors.muted,
+                  flex: 1,
                 }]}
-                onPress={() => setForm(p => ({ ...p, studentId: s.id, amount: course?.price.toString() ?? "" }))}
+                onPress={() => setForm(p => ({ ...p, method: m }))}
               >
-                <View style={[styles.studentAvatar, { backgroundColor: course?.color ?? colors.primary }]}>
-                  <Text style={[styles.studentInitials, { fontFamily: "Inter_600SemiBold" }]}>
-                    {s.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.studentName, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>{s.name}</Text>
-                  <Text style={[styles.studentSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{course?.name}</Text>
-                </View>
-                {form.studentId === s.id && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                <Ionicons name={m === "cash" ? "cash-outline" : "card-outline"} size={18} color={form.method === m ? "#FFFFFF" : colors.mutedForeground} />
+                <Text style={[styles.methodChipText, { color: form.method === m ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                  {m === "cash" ? "Naqd" : "Plastik"}
+                </Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
+            ))}
+          </View>
 
-        <FormField label="Miqdor (so'm) *" value={form.amount} onChangeText={v => setForm(p => ({ ...p, amount: v }))} placeholder="350000" keyboardType="numeric" suffix="so'm" />
-        <FormField label="Oy (YYYY-MM)" value={form.month} onChangeText={v => setForm(p => ({ ...p, month: v }))} placeholder="2026-07" />
-        <FormField label="Izoh" value={form.note} onChangeText={v => setForm(p => ({ ...p, note: v }))} placeholder="Ixtiyoriy izoh" />
+          <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Holat</Text>
+          <View style={styles.statusRow}>
+            {(["paid", "pending", "overdue"] as const).map(s => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.statusChip, {
+                  backgroundColor: form.status === s
+                    ? (s === "paid" ? "#10B981" : s === "pending" ? "#F59E0B" : "#EF4444")
+                    : colors.muted
+                }]}
+                onPress={() => setForm(p => ({ ...p, status: s }))}
+              >
+                <Text style={[styles.statusText, { color: form.status === s ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                  {s === "paid" ? "To'langan" : s === "pending" ? "Kutilmoqda" : "Kechikkan"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>To'lov usuli</Text>
-        <View style={styles.methodPickerRow}>
-          {(["cash", "card"] as const).map(m => (
-            <TouchableOpacity
-              key={m}
-              style={[styles.methodChip, {
-                backgroundColor: form.method === m ? (m === "cash" ? "#10B981" : colors.primary) : colors.muted,
-                flex: 1,
-              }]}
-              onPress={() => setForm(p => ({ ...p, method: m }))}
-            >
-              <Ionicons name={m === "cash" ? "cash-outline" : "card-outline"} size={18} color={form.method === m ? "#FFFFFF" : colors.mutedForeground} />
-              <Text style={[styles.methodChipText, { color: form.method === m ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
-                {m === "cash" ? "Naqd" : "Plastik"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Holat</Text>
-        <View style={styles.statusRow}>
-          {(["paid", "pending", "overdue"] as const).map(s => (
-            <TouchableOpacity
-              key={s}
-              style={[styles.statusChip, {
-                backgroundColor: form.status === s
-                  ? (s === "paid" ? "#10B981" : s === "pending" ? "#F59E0B" : "#EF4444")
-                  : colors.muted
-              }]}
-              onPress={() => setForm(p => ({ ...p, status: s }))}
-            >
-              <Text style={[styles.statusText, { color: form.status === s ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
-                {s === "paid" ? "To'langan" : s === "pending" ? "Kutilmoqda" : "Kechikkan"}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: (!form.studentId || !form.amount) ? 0.5 : 1 }]}
-          onPress={handleSave}
-          disabled={!form.studentId || !form.amount}
-          activeOpacity={0.85}
-        >
-          <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>Saqlash</Text>
-        </TouchableOpacity>
-      </ModalSheet>
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: (!form.studentId || !form.amount) ? 0.5 : 1 }]}
+            onPress={handleSave}
+            disabled={!form.studentId || !form.amount}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>Saqlash</Text>
+          </TouchableOpacity>
+        </ModalSheet>
+      )}
 
       {/* Transaction Modal */}
       <ModalSheet visible={showTxModal} onClose={() => setShowTxModal(false)} title="To'lov qo'shish">
@@ -385,7 +434,7 @@ export default function PaymentsScreen() {
           ))}
         </View>
 
-        {txForm.method === "card" && (
+        {txForm.method === "card" && !isWeb && (
           <View style={styles.receiptSection}>
             <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Chek rasmi</Text>
             {txForm.receiptUri ? (
@@ -451,6 +500,8 @@ const styles = StyleSheet.create({
   summaryCard: { flex: 1, borderRadius: 14, padding: 10, alignItems: "center", borderWidth: 1 },
   summaryAmount: { fontSize: 18 },
   summaryLabel: { fontSize: 11, marginTop: 2 },
+  teacherNotice: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginHorizontal: 16, marginTop: 8, padding: 12, borderRadius: 12, borderWidth: 1 },
+  teacherNoticeText: { fontSize: 12, flex: 1, lineHeight: 18 },
   chipsRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8, flexDirection: "row" },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   groupChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },

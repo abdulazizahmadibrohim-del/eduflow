@@ -45,22 +45,106 @@ function calcPercentEarnings(
 }
 
 const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
-  group: "Guruh chegirmasi",
-  individual: "Individual chegirma",
-  monthly: "Oylik chegirma",
-  earlybird_10: "Erta to'lov (1–10 kun)",
-  earlybird_15: "Erta to'lov (11–15 kun)",
+  earlybird: "Erta to'lov",
   registration: "Ro'yxatdan o'tish",
+  group: "Guruh chegirmasi",
+  individual: "Individual",
+  monthly: "Oylik",
+  custom: "Maxsus",
 };
 
 const DISCOUNT_TYPE_ICONS: Record<DiscountType, any> = {
+  earlybird: "flash-outline",
+  registration: "star-outline",
   group: "people-outline",
   individual: "person-outline",
   monthly: "calendar-outline",
-  earlybird_10: "flash-outline",
-  earlybird_15: "time-outline",
-  registration: "star-outline",
+  custom: "pricetag-outline",
 };
+
+interface DiscountFormState {
+  name: string;
+  type: DiscountType;
+  percent: number;
+  durationMonths: number;
+  hasDuration: boolean;
+  startDay: number;
+  endDay: number;
+  hasDateRange: boolean;
+  active: boolean;
+}
+
+function makeEmptyDiscountForm(): DiscountFormState {
+  return {
+    name: "",
+    type: "earlybird",
+    percent: 10,
+    durationMonths: 1,
+    hasDuration: false,
+    startDay: 1,
+    endDay: 10,
+    hasDateRange: true,
+    active: true,
+  };
+}
+
+function discountToForm(d: Discount): DiscountFormState {
+  return {
+    name: d.name,
+    type: d.type,
+    percent: d.percent,
+    durationMonths: d.durationMonths ?? 1,
+    hasDuration: !!d.durationMonths,
+    startDay: d.startDay ?? 1,
+    endDay: d.endDay ?? 10,
+    hasDateRange: d.type === "earlybird" || !!(d.startDay || d.endDay),
+    active: d.active,
+  };
+}
+
+function Stepper({
+  value, min, max, step = 1, onChange, label, colors,
+}: {
+  value: number; min: number; max: number; step?: number;
+  onChange: (v: number) => void; label: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={stepperStyles.row}>
+      <Text style={[stepperStyles.label, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+        {label}
+      </Text>
+      <View style={stepperStyles.controls}>
+        <TouchableOpacity
+          style={[stepperStyles.btn, { backgroundColor: colors.muted, borderColor: colors.border }]}
+          onPress={() => { onChange(Math.max(min, value - step)); Haptics.selectionAsync(); }}
+          disabled={value <= min}
+        >
+          <Text style={[stepperStyles.btnText, { color: value <= min ? colors.mutedForeground : colors.foreground }]}>−</Text>
+        </TouchableOpacity>
+        <Text style={[stepperStyles.value, { color: colors.foreground, fontFamily: "Inter_700Bold" }]}>
+          {value}
+        </Text>
+        <TouchableOpacity
+          style={[stepperStyles.btn, { backgroundColor: colors.muted, borderColor: colors.border }]}
+          onPress={() => { onChange(Math.min(max, value + step)); Haptics.selectionAsync(); }}
+          disabled={value >= max}
+        >
+          <Text style={[stepperStyles.btnText, { color: value >= max ? colors.mutedForeground : colors.foreground }]}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const stepperStyles = StyleSheet.create({
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+  label: { fontSize: 13, flex: 1 },
+  controls: { flexDirection: "row", alignItems: "center", gap: 10 },
+  btn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  btnText: { fontSize: 20, lineHeight: 28 },
+  value: { fontSize: 17, minWidth: 40, textAlign: "center" },
+});
 
 export default function SettingsScreen() {
   const colors = useColors();
@@ -88,14 +172,11 @@ export default function SettingsScreen() {
 
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [editingDiscount, setEditingDiscount] = useState<Discount | null>(null);
-  const [discountForm, setDiscountForm] = useState({
-    name: "", type: "earlybird_10" as DiscountType, percent: "10",
-    durationMonths: "", active: true,
-  });
+  const [discountForm, setDiscountForm] = useState<DiscountFormState>(makeEmptyDiscountForm());
 
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<DiscountRequest | null>(null);
-  const [resolveForm, setResolveForm] = useState({ approvedPercent: "", approvedDurationMonths: "" });
+  const [resolveForm, setResolveForm] = useState({ approvedPercent: 10, approvedDurationMonths: 1, hasDuration: false });
 
   const openAdd = () => {
     setEditingTeacher(null);
@@ -130,21 +211,23 @@ export default function SettingsScreen() {
 
   const openAddDiscount = () => {
     setEditingDiscount(null);
-    setDiscountForm({ name: DISCOUNT_TYPE_LABELS.earlybird_10, type: "earlybird_10", percent: "10", durationMonths: "", active: true });
+    setDiscountForm(makeEmptyDiscountForm());
     setShowDiscountModal(true);
   };
   const openEditDiscount = (d: Discount) => {
     setEditingDiscount(d);
-    setDiscountForm({ name: d.name, type: d.type, percent: d.percent.toString(), durationMonths: d.durationMonths?.toString() ?? "", active: d.active });
+    setDiscountForm(discountToForm(d));
     setShowDiscountModal(true);
   };
   const saveDiscount = () => {
-    if (!discountForm.name || !discountForm.percent) return;
-    const data = {
-      name: discountForm.name,
+    if (!discountForm.name.trim() || discountForm.percent < 1) return;
+    const data: Omit<Discount, "id" | "createdAt"> = {
+      name: discountForm.name.trim(),
       type: discountForm.type,
-      percent: Number(discountForm.percent),
-      durationMonths: discountForm.durationMonths ? Number(discountForm.durationMonths) : undefined,
+      percent: discountForm.percent,
+      durationMonths: discountForm.hasDuration ? discountForm.durationMonths : undefined,
+      startDay: discountForm.hasDateRange ? discountForm.startDay : undefined,
+      endDay: discountForm.hasDateRange ? discountForm.endDay : undefined,
       active: discountForm.active,
     };
     if (editingDiscount) updateDiscount(editingDiscount.id, data);
@@ -155,23 +238,25 @@ export default function SettingsScreen() {
 
   const openRequestReview = (r: DiscountRequest) => {
     setSelectedRequest(r);
-    setResolveForm({ approvedPercent: r.percent.toString(), approvedDurationMonths: r.approvedDurationMonths?.toString() ?? "" });
+    setResolveForm({
+      approvedPercent: r.percent,
+      approvedDurationMonths: r.approvedDurationMonths ?? 1,
+      hasDuration: !!r.approvedDurationMonths,
+    });
     setShowRequestModal(true);
   };
   const approveRequest = () => {
     if (!selectedRequest) return;
-    resolveDiscountRequest(selectedRequest.id, {
-      status: "approved",
-      approvedPercent: resolveForm.approvedPercent ? Number(resolveForm.approvedPercent) : selectedRequest.percent,
-      approvedDurationMonths: resolveForm.approvedDurationMonths ? Number(resolveForm.approvedDurationMonths) : undefined,
-    });
+    const approvedPercent = resolveForm.approvedPercent;
+    const approvedDurationMonths = resolveForm.hasDuration ? resolveForm.approvedDurationMonths : undefined;
+    resolveDiscountRequest(selectedRequest.id, { status: "approved", approvedPercent, approvedDurationMonths });
     addDiscount({
       name: `${selectedRequest.targetType === "student" ? "O'quvchi" : "Guruh"} chegirmasi`,
       type: selectedRequest.targetType === "student" ? "individual" : "group",
       targetId: selectedRequest.targetId,
-      percent: resolveForm.approvedPercent ? Number(resolveForm.approvedPercent) : selectedRequest.percent,
+      percent: approvedPercent,
       month: selectedRequest.month,
-      durationMonths: resolveForm.approvedDurationMonths ? Number(resolveForm.approvedDurationMonths) : undefined,
+      durationMonths: approvedDurationMonths,
       active: true,
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -224,6 +309,14 @@ export default function SettingsScreen() {
   };
 
   const topPadding = isWeb ? 67 : insets.top;
+
+  const discountSummary = (d: Discount): string => {
+    const parts: string[] = [`${d.percent}%`];
+    if (d.startDay && d.endDay) parts.push(`${d.startDay}–${d.endDay}-kun`);
+    if (d.durationMonths) parts.push(`${d.durationMonths} oy`);
+    else if (!d.startDay) parts.push("Cheksiz");
+    return parts.join(" · ");
+  };
 
   return (
     <>
@@ -288,7 +381,6 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          {/* Teacher selector when role === teacher */}
           {(user?.role === "teacher") && teachers.length > 0 && (
             <View style={styles.teacherSelectorSection}>
               <Text style={[styles.teacherSelectorLabel, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
@@ -404,7 +496,7 @@ export default function SettingsScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.discountName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>{d.name}</Text>
                     <Text style={[styles.discountSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-                      {d.percent}%{d.durationMonths ? ` · ${d.durationMonths} oy` : " · Cheksiz"}
+                      {discountSummary(d)}
                     </Text>
                   </View>
                   <View style={styles.discountRight}>
@@ -458,35 +550,31 @@ export default function SettingsScreen() {
                     <Text style={[styles.teacherSubject, { color: subjectColor(t.subject), fontFamily: "Inter_500Medium" }]}>{t.subject}</Text>
                     {t.phone ? <Text style={[styles.teacherMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>{t.phone}</Text> : null}
 
-                    {/* Maosh badge */}
                     <View style={[styles.salaryBadge, {
                       backgroundColor: t.salaryType === "percentage" ? colors.secondary + "15" : colors.primary + "12",
                     }]}>
                       <Ionicons
                         name={t.salaryType === "percentage" ? "pie-chart-outline" : "cash-outline"}
-                        size={11}
+                        size={13}
                         color={t.salaryType === "percentage" ? colors.secondary : colors.primary}
                       />
                       {t.salaryType === "percentage" ? (
                         <View style={styles.percentStepper}>
                           <TouchableOpacity
-                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, -1)}
                             style={[styles.stepperBtn, { backgroundColor: colors.secondary + "20" }]}
+                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, -1)}
                           >
-                            <Text style={[styles.stepperIcon, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>−</Text>
+                            <Text style={[styles.stepperIcon, { color: colors.secondary }]}>−</Text>
                           </TouchableOpacity>
                           <Text style={[styles.percentValue, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>
                             {t.salaryPercent ?? 0}%
                           </Text>
                           <TouchableOpacity
-                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, +1)}
                             style={[styles.stepperBtn, { backgroundColor: colors.secondary + "20" }]}
+                            onPress={() => adjustPercent(t.id, t.salaryPercent ?? 0, 1)}
                           >
-                            <Text style={[styles.stepperIcon, { color: colors.secondary, fontFamily: "Inter_700Bold" }]}>+</Text>
+                            <Text style={[styles.stepperIcon, { color: colors.secondary }]}>+</Text>
                           </TouchableOpacity>
-                          <Text style={[styles.salaryBadgeText, { color: colors.secondary, fontFamily: "Inter_400Regular" }]}>
-                            · {salaryLabel(t)}
-                          </Text>
                         </View>
                       ) : (
                         <Text style={[styles.salaryBadgeText, { color: colors.primary, fontFamily: "Inter_500Medium" }]}>
@@ -494,9 +582,14 @@ export default function SettingsScreen() {
                         </Text>
                       )}
                     </View>
+                    {t.salaryType === "percentage" && (
+                      <Text style={[styles.teacherMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }]}>
+                        {salaryLabel(t)}
+                      </Text>
+                    )}
                   </View>
                   <View style={styles.teacherActions}>
-                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.muted }]} onPress={() => openEdit(t)}>
+                    <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary + "18" }]} onPress={() => openEdit(t)}>
                       <Ionicons name="pencil" size={15} color={colors.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#EF444418" }]} onPress={() => confirmDelete(t)}>
@@ -513,7 +606,7 @@ export default function SettingsScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>Dastur haqida</Text>
           {[
-            { label: "Versiya", value: "2.0.0", icon: "information-circle-outline" as const, color: colors.primary },
+            { label: "Versiya", value: "2.1.0", icon: "information-circle-outline" as const, color: colors.primary },
             { label: "Platform", value: Platform.OS === "ios" ? "iOS" : Platform.OS === "android" ? "Android" : "Web", icon: "phone-portrait-outline" as const, color: colors.secondary },
             { label: "Mavzu", value: colorScheme === "dark" ? "Qorong'u" : "Yorug'", icon: "color-palette-outline" as const, color: "#10B981" },
           ].map((item, i, arr) => (
@@ -619,7 +712,12 @@ export default function SettingsScreen() {
 
       {/* Discount Modal */}
       <ModalSheet visible={showDiscountModal} onClose={() => setShowDiscountModal(false)} title={editingDiscount ? "Chegirmani tahrirlash" : "Yangi chegirma"}>
-        <FormField label="Chegirma nomi *" value={discountForm.name} onChangeText={v => setDiscountForm(p => ({ ...p, name: v }))} placeholder="masalan: Erta to'lov chegirmasi" />
+        <FormField
+          label="Chegirma nomi *"
+          value={discountForm.name}
+          onChangeText={v => setDiscountForm(p => ({ ...p, name: v }))}
+          placeholder="masalan: Erta to'lov chegirmasi"
+        />
 
         <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Turi</Text>
         <View style={styles.discountTypeGrid}>
@@ -630,7 +728,15 @@ export default function SettingsScreen() {
                 backgroundColor: discountForm.type === type ? "#10B981" : colors.muted,
                 borderColor: discountForm.type === type ? "#10B981" : colors.border,
               }]}
-              onPress={() => setDiscountForm(p => ({ ...p, type, name: p.name || DISCOUNT_TYPE_LABELS[type] }))}
+              onPress={() => {
+                const isEarlybird = type === "earlybird";
+                setDiscountForm(p => ({
+                  ...p,
+                  type,
+                  name: p.name || DISCOUNT_TYPE_LABELS[type],
+                  hasDateRange: isEarlybird,
+                }));
+              }}
             >
               <Ionicons name={DISCOUNT_TYPE_ICONS[type]} size={14} color={discountForm.type === type ? "#FFFFFF" : colors.mutedForeground} />
               <Text style={[styles.typeChipText, { color: discountForm.type === type ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
@@ -640,10 +746,97 @@ export default function SettingsScreen() {
           ))}
         </View>
 
-        <FormField label="Chegirma foizi (%) *" value={discountForm.percent} onChangeText={v => setDiscountForm(p => ({ ...p, percent: v }))} placeholder="10" keyboardType="numeric" suffix="%" />
-        <FormField label="Davomiylik (oy) — bo'sh = cheksiz" value={discountForm.durationMonths} onChangeText={v => setDiscountForm(p => ({ ...p, durationMonths: v }))} placeholder="1" keyboardType="numeric" />
+        {/* Percent stepper */}
+        <Stepper
+          label="Chegirma foizi (%)"
+          value={discountForm.percent}
+          min={1}
+          max={100}
+          onChange={v => setDiscountForm(p => ({ ...p, percent: v }))}
+          colors={colors}
+        />
 
-        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Holat</Text>
+        {/* Date range toggle */}
+        <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.toggleRowLabel, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
+              Kun oralig'i (oy kunlari)
+            </Text>
+            <Text style={[styles.toggleRowSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              Masalan: 1–10 kun oralig'ida amal qiladi
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.switchBtn, { backgroundColor: discountForm.hasDateRange ? "#10B981" : colors.muted }]}
+            onPress={() => setDiscountForm(p => ({ ...p, hasDateRange: !p.hasDateRange }))}
+          >
+            <Text style={[styles.switchBtnText, { color: discountForm.hasDateRange ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
+              {discountForm.hasDateRange ? "Ha" : "Yo'q"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {discountForm.hasDateRange && (
+          <View style={[styles.dayRangeBox, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+            <Stepper
+              label={`Boshlanish kuni — ${discountForm.startDay}-kun`}
+              value={discountForm.startDay}
+              min={1}
+              max={discountForm.endDay - 1}
+              onChange={v => setDiscountForm(p => ({ ...p, startDay: v }))}
+              colors={colors}
+            />
+            <Stepper
+              label={`Tugash kuni — ${discountForm.endDay}-kun`}
+              value={discountForm.endDay}
+              min={discountForm.startDay + 1}
+              max={31}
+              onChange={v => setDiscountForm(p => ({ ...p, endDay: v }))}
+              colors={colors}
+            />
+            <View style={[styles.dayRangePreview, { backgroundColor: "#10B98115", borderColor: "#10B98130" }]}>
+              <Ionicons name="information-circle-outline" size={14} color="#10B981" />
+              <Text style={[styles.dayRangePreviewText, { color: "#10B981", fontFamily: "Inter_400Regular" }]}>
+                Har oyning {discountForm.startDay}–{discountForm.endDay}-kunlarida to'lov qilinganda {discountForm.percent}% chegirma beriladi
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Duration toggle */}
+        <View style={[styles.toggleRow, { borderColor: colors.border, marginTop: 8 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.toggleRowLabel, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
+              Muddatli chegirma
+            </Text>
+            <Text style={[styles.toggleRowSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              {discountForm.hasDuration ? `${discountForm.durationMonths} oy amal qiladi` : "Cheksiz amal qiladi"}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.switchBtn, { backgroundColor: discountForm.hasDuration ? colors.secondary : colors.muted }]}
+            onPress={() => setDiscountForm(p => ({ ...p, hasDuration: !p.hasDuration }))}
+          >
+            <Text style={[styles.switchBtnText, { color: discountForm.hasDuration ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
+              {discountForm.hasDuration ? "Ha" : "Yo'q"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {discountForm.hasDuration && (
+          <View style={[styles.durationBox, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+            <Stepper
+              label="Necha oy amal qiladi"
+              value={discountForm.durationMonths}
+              min={1}
+              max={24}
+              onChange={v => setDiscountForm(p => ({ ...p, durationMonths: v }))}
+              colors={colors}
+            />
+          </View>
+        )}
+
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 8 }]}>Holat</Text>
         <View style={[styles.roleRow, { marginBottom: 20 }]}>
           {([true, false] as const).map(active => (
             <TouchableOpacity
@@ -660,9 +853,9 @@ export default function SettingsScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: !discountForm.name || !discountForm.percent ? colors.muted : "#10B981" }]}
+          style={[styles.saveBtn, { backgroundColor: !discountForm.name.trim() || discountForm.percent < 1 ? colors.muted : "#10B981" }]}
           onPress={saveDiscount}
-          disabled={!discountForm.name || !discountForm.percent}
+          disabled={!discountForm.name.trim() || discountForm.percent < 1}
           activeOpacity={0.85}
         >
           <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>{editingDiscount ? "Saqlash" : "Qo'shish"}</Text>
@@ -718,24 +911,48 @@ export default function SettingsScreen() {
               )}
             </View>
 
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 8 }]}>
-              Tasdiqlanadigan foiz (o'zgartirish mumkin)
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginTop: 8, marginBottom: 12 }]}>
+              Tasdiqlash sozlamalari
             </Text>
-            <FormField
-              label=""
+
+            <Stepper
+              label="Tasdiqlanadigan foiz (%)"
               value={resolveForm.approvedPercent}
-              onChangeText={v => setResolveForm(p => ({ ...p, approvedPercent: v }))}
-              placeholder={selectedRequest.percent.toString()}
-              keyboardType="numeric"
-              suffix="%"
+              min={1}
+              max={100}
+              onChange={v => setResolveForm(p => ({ ...p, approvedPercent: v }))}
+              colors={colors}
             />
-            <FormField
-              label="Davomiylik (oy) — bo'sh = so'ralganicha"
-              value={resolveForm.approvedDurationMonths}
-              onChangeText={v => setResolveForm(p => ({ ...p, approvedDurationMonths: v }))}
-              placeholder="ixtiyoriy"
-              keyboardType="numeric"
-            />
+
+            <View style={[styles.toggleRow, { borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.toggleRowLabel, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>Muddatli</Text>
+                <Text style={[styles.toggleRowSub, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                  {resolveForm.hasDuration ? `${resolveForm.approvedDurationMonths} oy` : "Cheksiz"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.switchBtn, { backgroundColor: resolveForm.hasDuration ? colors.secondary : colors.muted }]}
+                onPress={() => setResolveForm(p => ({ ...p, hasDuration: !p.hasDuration }))}
+              >
+                <Text style={[styles.switchBtnText, { color: resolveForm.hasDuration ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_600SemiBold" }]}>
+                  {resolveForm.hasDuration ? "Ha" : "Yo'q"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {resolveForm.hasDuration && (
+              <View style={[styles.durationBox, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                <Stepper
+                  label="Necha oy amal qiladi"
+                  value={resolveForm.approvedDurationMonths}
+                  min={1}
+                  max={24}
+                  onChange={v => setResolveForm(p => ({ ...p, approvedDurationMonths: v }))}
+                  colors={colors}
+                />
+              </View>
+            )}
 
             <View style={styles.resolveActions}>
               <TouchableOpacity
@@ -834,6 +1051,15 @@ const styles = StyleSheet.create({
   discountTypeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
   typeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
   typeChipText: { fontSize: 12 },
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 12 },
+  toggleRowLabel: { fontSize: 14, marginBottom: 2 },
+  toggleRowSub: { fontSize: 12 },
+  switchBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  switchBtnText: { fontSize: 13 },
+  dayRangeBox: { padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 12 },
+  dayRangePreview: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: 10, borderWidth: 1, marginTop: 4 },
+  dayRangePreviewText: { fontSize: 12, flex: 1, lineHeight: 18 },
+  durationBox: { padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 12 },
   requestDetailBox: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10, marginBottom: 16 },
   requestDetailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   requestDetailLabel: { fontSize: 13 },

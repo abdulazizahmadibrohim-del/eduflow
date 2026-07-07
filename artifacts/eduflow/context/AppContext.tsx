@@ -87,7 +87,7 @@ export interface Attendance {
   status: "present" | "absent" | "late";
 }
 
-export type DiscountType = "group" | "individual" | "monthly" | "earlybird_10" | "earlybird_15" | "registration";
+export type DiscountType = "group" | "individual" | "monthly" | "earlybird" | "registration" | "custom";
 
 export interface Discount {
   id: string;
@@ -97,6 +97,8 @@ export interface Discount {
   month?: string;
   percent: number;
   durationMonths?: number;
+  startDay?: number;
+  endDay?: number;
   active: boolean;
   createdAt: string;
 }
@@ -155,7 +157,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-const STORAGE_KEY = "eduflow_data_v3";
+const STORAGE_KEY = "eduflow_data_v4";
 
 function genId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -192,8 +194,8 @@ const SAMPLE_PAYMENTS: Payment[] = [
 ];
 
 const SAMPLE_DISCOUNTS: Discount[] = [
-  { id: "d1", name: "Erta to'lov (1–10 kun)", type: "earlybird_10", percent: 10, active: true, createdAt: "2026-01-01" },
-  { id: "d2", name: "Erta to'lov (11–15 kun)", type: "earlybird_15", percent: 5, active: true, createdAt: "2026-01-01" },
+  { id: "d1", name: "Erta to'lov (1–10 kun)", type: "earlybird", percent: 10, startDay: 1, endDay: 10, active: true, createdAt: "2026-01-01" },
+  { id: "d2", name: "Erta to'lov (11–15 kun)", type: "earlybird", percent: 5, startDay: 11, endDay: 15, active: true, createdAt: "2026-01-01" },
   { id: "d3", name: "Ro'yxatdan o'tish chegirmasi", type: "registration", percent: 20, durationMonths: 1, active: true, createdAt: "2026-01-01" },
 ];
 

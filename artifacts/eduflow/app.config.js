@@ -43,7 +43,7 @@ module.exports = {
       supabaseUrl: process.env.SUPABASE_URL,
       supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
       eas: {
-        projectId: "eduflow",
+        projectId: "2feac356-4ce4-4d8e-9d59-3b8c299ba0d5",
       },
     },
   },

@@ -2,6 +2,7 @@
   "expo": {
     "name": "EduFlow",
     "slug": "eduflow",
+    "owner": "abdulazizahmad",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -14,25 +15,34 @@
       "backgroundColor": "#F8FAFC"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.abdulazizahmad.eduflow"
     },
-    "android": {},
+    "android": {
+      "package": "com.abdulazizahmad.eduflow",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#1E3A8A"
+      },
+      "versionCode": 1
+    },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/icon.png",
+      "bundler": "metro"
     },
     "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "https://replit.com/"
-        }
-      ],
+      ["expo-router", { "origin": "https://replit.com/" }],
       "expo-font",
       "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2feac356-4ce4-4d8e-9d59-3b8c299ba0d5"
+      }
     }
   }
 }

@@ -7,17 +7,11 @@
     "preview": {
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_MONOREPO_WORKSPACE_ROOT": "../.."
       }
     },
     "production": {
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_MONOREPO_WORKSPACE_ROOT": "../.."
       }
     }
   },

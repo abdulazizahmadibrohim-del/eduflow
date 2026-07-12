@@ -9,12 +9,15 @@ interface CourseCardProps {
   course: Course;
   students: Student[];
   onPress: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-export function CourseCard({ course, students, onPress }: CourseCardProps) {
+export function CourseCard({ course, students, onPress, onEdit, onDelete }: CourseCardProps) {
   const colors = useColors();
   const activeCount = students.filter(s => s.courseId === course.id && s.status === "active").length;
   const totalCount = students.filter(s => s.courseId === course.id).length;
+  const showActions = !!(onEdit || onDelete);
 
   return (
     <TouchableOpacity
@@ -52,6 +55,31 @@ export function CourseCard({ course, students, onPress }: CourseCardProps) {
             {course.price.toLocaleString()} so'm
           </Text>
         </View>
+
+        {showActions && (
+          <View style={styles.actions}>
+            {onEdit && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}
+                onPress={(e) => { e.stopPropagation?.(); Haptics.selectionAsync(); onEdit(); }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="pencil-outline" size={13} color={colors.primary} />
+                <Text style={[styles.actionTxt, { color: colors.primary, fontFamily: "Inter_500Medium" }]}>Tahrirlash</Text>
+              </TouchableOpacity>
+            )}
+            {onDelete && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: "#EF444415", borderColor: "#EF444430" }]}
+                onPress={(e) => { e.stopPropagation?.(); Haptics.selectionAsync(); onDelete(); }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={13} color="#EF4444" />
+                <Text style={[styles.actionTxt, { color: "#EF4444", fontFamily: "Inter_500Medium" }]}>O'chirish</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -111,5 +139,22 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 15,
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  actionTxt: {
+    fontSize: 12,
   },
 });

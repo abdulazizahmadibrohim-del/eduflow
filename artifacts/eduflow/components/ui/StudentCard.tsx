@@ -11,6 +11,8 @@ interface StudentCardProps {
   group?: Group;
   paymentStatus?: "paid" | "pending" | "overdue" | "partial";
   onPress: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
 const statusConfig = {
@@ -20,11 +22,12 @@ const statusConfig = {
   partial: { color: "#0EA5E9", label: "Qisman", icon: "timer-outline" as const },
 };
 
-export function StudentCard({ student, course, group, paymentStatus, onPress }: StudentCardProps) {
+export function StudentCard({ student, course, group, paymentStatus, onPress, onEdit, onDelete }: StudentCardProps) {
   const colors = useColors();
   const initials = student.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   const avatarColor = course?.color ?? colors.primary;
   const status = paymentStatus ? statusConfig[paymentStatus] : null;
+  const showActions = !!(onEdit || onDelete);
 
   return (
     <TouchableOpacity
@@ -49,6 +52,31 @@ export function StudentCard({ student, course, group, paymentStatus, onPress }: 
         <Text style={[styles.phone, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
           {student.phone}
         </Text>
+
+        {showActions && (
+          <View style={styles.actions}>
+            {onEdit && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}
+                onPress={(e) => { e.stopPropagation?.(); Haptics.selectionAsync(); onEdit(); }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="pencil-outline" size={13} color={colors.primary} />
+                <Text style={[styles.actionTxt, { color: colors.primary, fontFamily: "Inter_500Medium" }]}>Tahrirlash</Text>
+              </TouchableOpacity>
+            )}
+            {onDelete && (
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: "#EF444415", borderColor: "#EF444430" }]}
+                onPress={(e) => { e.stopPropagation?.(); Haptics.selectionAsync(); onDelete(); }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={13} color="#EF4444" />
+                <Text style={[styles.actionTxt, { color: "#EF4444", fontFamily: "Inter_500Medium" }]}>O'chirish</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
 
       <View style={styles.right}>
@@ -67,7 +95,9 @@ export function StudentCard({ student, course, group, paymentStatus, onPress }: 
             </Text>
           </View>
         )}
-        <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} style={{ marginTop: 8 }} />
+        {!showActions && (
+          <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} style={{ marginTop: 8 }} />
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -76,7 +106,7 @@ export function StudentCard({ student, course, group, paymentStatus, onPress }: 
 const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
@@ -90,6 +120,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+    marginTop: 2,
   },
   initials: {
     color: "#FFFFFF",
@@ -106,6 +137,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   phone: {
+    fontSize: 12,
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 8,
+    flexWrap: "wrap",
+  },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  actionTxt: {
     fontSize: 12,
   },
   right: {

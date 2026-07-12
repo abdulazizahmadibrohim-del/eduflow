@@ -238,6 +238,8 @@ export default function StudentsScreen() {
               group={groups.find(g => g.id === item.groupId)}
               paymentStatus={getPaymentStatus(item.id)}
               onPress={() => isTeacher ? undefined : openEdit(item)}
+              onEdit={!isTeacher ? () => openEdit(item) : undefined}
+              onDelete={!isTeacher ? () => handleDelete(item.id) : undefined}
             />
             {isTeacher && user?.teacherId && (
               <TouchableOpacity

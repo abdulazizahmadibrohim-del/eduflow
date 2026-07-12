@@ -190,7 +190,13 @@ export default function CoursesScreen() {
           data={filteredCourses}
           keyExtractor={item => item.id}
           renderItem={({ item }) => (
-            <CourseCard course={item} students={students} onPress={() => openEditCourse(item)} />
+            <CourseCard
+              course={item}
+              students={students}
+              onPress={() => openEditCourse(item)}
+              onEdit={!isTeacher ? () => openEditCourse(item) : undefined}
+              onDelete={!isTeacher ? () => deleteCourseHandler(item.id) : undefined}
+            />
           )}
           contentContainerStyle={[styles.list, { paddingBottom: isWeb ? 34 + 80 : 80 }]}
           ListEmptyComponent={<EmptyState icon="book-outline" title="Kurslar yo'q" description="Birinchi kursni yarating" actionLabel="Kurs qo'shish" onAction={isTeacher ? undefined : openAddCourse} />}
@@ -240,7 +246,22 @@ export default function CoursesScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
-                  {!isTeacher && <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />}
+                  {!isTeacher && (
+                    <View style={styles.groupActions}>
+                      <TouchableOpacity
+                        style={[styles.groupActionBtn, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}
+                        onPress={() => openEditGroup(item)}
+                      >
+                        <Ionicons name="pencil-outline" size={13} color={colors.primary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.groupActionBtn, { backgroundColor: "#EF444415", borderColor: "#EF444430" }]}
+                        onPress={() => deleteGroupHandler(item.id)}
+                      >
+                        <Ionicons name="trash-outline" size={13} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -413,6 +434,8 @@ const styles = StyleSheet.create({
   groupRight: { alignItems: "flex-end", gap: 8 },
   groupDiscountBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1 },
   groupDiscountTxt: { fontSize: 12 },
+  groupActions: { flexDirection: "row", gap: 6 },
+  groupActionBtn: { width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   pickerLabel: { fontSize: 13, marginBottom: 8, marginTop: 4 },
   colorRow: { flexDirection: "row", gap: 10, marginBottom: 20, flexWrap: "wrap" },
   colorDot: { width: 32, height: 32, borderRadius: 16 },

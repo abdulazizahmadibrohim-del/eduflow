@@ -130,6 +130,7 @@ interface AppContextType {
   deleteTeacher: (id: string) => Promise<void>;
   students: Student[];
   addStudent: (s: Omit<Student, "id" | "enrolledAt">) => Promise<void>;
+  addStudentsBulk: (list: Omit<Student, "id" | "enrolledAt">[]) => Promise<number>;
   updateStudent: (id: string, data: Partial<Student>) => Promise<void>;
   deleteStudent: (id: string) => Promise<void>;
   courses: Course[];
@@ -143,6 +144,7 @@ interface AppContextType {
   payments: Payment[];
   addPayment: (p: Omit<Payment, "id">) => Promise<Payment>;
   updatePayment: (id: string, data: Partial<Payment>) => Promise<void>;
+  deletePayment: (id: string) => Promise<void>;
   addTransaction: (paymentId: string, tx: Omit<PaymentTransaction, "id">) => Promise<void>;
   attendances: Attendance[];
   addAttendance: (a: Omit<Attendance, "id">) => Promise<void>;
@@ -366,6 +368,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!error && data) setStudents(prev => [...prev, dbToStudent(data)]);
   }, []);
 
+  const addStudentsBulk = useCallback(async (list: Omit<Student, "id" | "enrolledAt">[]): Promise<number> => {
+    if (list.length === 0) return 0;
+    const today = new Date().toISOString().split("T")[0];
+    const rows = list.map(s => ({
+      id: genId(), name: s.name, phone: s.phone,
+      parent_phone: s.parentPhone ?? null,
+      course_id: s.courseId, group_id: s.groupId, status: s.status,
+      enrolled_at: today,
+    }));
+    const { data, error } = await supabase.from("students").insert(rows).select();
+    if (error || !data) throw new Error(error?.message ?? "O'quvchilar qo'shilmadi");
+    setStudents(prev => [...prev, ...data.map(dbToStudent)]);
+    return data.length;
+  }, []);
+
   const updateStudent = useCallback(async (id: string, data: Partial<Student>) => {
     const row: any = {};
     if (data.name !== undefined) row.name = data.name;
@@ -483,6 +500,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const deletePayment = useCallback(async (id: string) => {
+    const { error: txError } = await supabase.from("payment_transactions").delete().eq("payment_id", id);
+    if (txError) throw new Error(txError.message);
+    const { error } = await supabase.from("payments").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    setPayments(prev => prev.filter(p => p.id !== id));
+  }, []);
+
   const addTransaction = useCallback(async (paymentId: string, tx: Omit<PaymentTransaction, "id">) => {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment) return;
@@ -579,10 +604,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     <AppContext.Provider value={{
       user, setUser,
       teachers, addTeacher, updateTeacher, deleteTeacher,
-      students, addStudent, updateStudent, deleteStudent,
+      students, addStudent, addStudentsBulk, updateStudent, deleteStudent,
       courses, addCourse, updateCourse, deleteCourse,
       groups, addGroup, updateGroup, deleteGroup,
-      payments, addPayment, updatePayment, addTransaction,
+      payments, addPayment, updatePayment, deletePayment, addTransaction,
       attendances, addAttendance, updateAttendance,
       discounts, addDiscount, updateDiscount, deleteDiscount,
       discountRequests, addDiscountRequest, resolveDiscountRequest,

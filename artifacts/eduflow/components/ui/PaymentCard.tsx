@@ -10,6 +10,7 @@ interface PaymentCardProps {
   student?: Student;
   onMarkPaid?: () => void;
   onAddTransaction?: () => void;
+  onDelete?: () => void;
   onPress?: () => void;
 }
 
@@ -20,7 +21,7 @@ const STATUS = {
   partial: { color: "#0EA5E9", bg: "#0EA5E918", label: "Qisman to'langan", icon: "timer-outline" as const },
 };
 
-export function PaymentCard({ payment, student, onMarkPaid, onAddTransaction, onPress }: PaymentCardProps) {
+export function PaymentCard({ payment, student, onMarkPaid, onAddTransaction, onDelete, onPress }: PaymentCardProps) {
   const colors = useColors();
   const cfg = STATUS[payment.status];
   const paidTotal = payment.paidTotal ?? 0;
@@ -117,6 +118,18 @@ export function PaymentCard({ payment, student, onMarkPaid, onAddTransaction, on
                 </Text>
               </TouchableOpacity>
             )}
+            {onDelete && (
+              <TouchableOpacity
+                style={[styles.deleteBtn, { backgroundColor: "#EF444415", borderColor: "#EF444440" }]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  onDelete();
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="trash-outline" size={15} color="#EF4444" />
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
@@ -169,4 +182,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   payBtnText: { fontSize: 13 },
+  deleteBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
 });

@@ -2,12 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useMemo, useState } from "react";
 import {
-  Alert, FlatList, Platform, ScrollView,
+  FlatList, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Student } from "@/context/AppContext";
+import { confirmAction, showAlert } from "@/lib/confirm";
 import { StudentCard } from "@/components/ui/StudentCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ModalSheet } from "@/components/ui/ModalSheet";
@@ -19,7 +20,7 @@ export default function StudentsScreen() {
   const isWeb = Platform.OS === "web";
   const {
     user, students, courses, groups, payments,
-    addStudent, updateStudent, deleteStudent,
+    addStudent, addStudentsBulk, updateStudent, deleteStudent,
     addDiscountRequest,
   } = useApp();
 
@@ -36,6 +37,9 @@ export default function StudentsScreen() {
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [discountTargetStudent, setDiscountTargetStudent] = useState<Student | null>(null);
+  const [addMode, setAddMode] = useState<"single" | "bulk">("single");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const [form, setForm] = useState({
     name: "", phone: "", parentPhone: "",
@@ -72,7 +76,8 @@ export default function StudentsScreen() {
 
   const openAdd = () => {
     setEditingStudent(null);
-    const firstGroup = visibleGroups[0];
+    const preselected = groupFilter !== "all" ? visibleGroups.find(g => g.id === groupFilter) : undefined;
+    const firstGroup = preselected ?? visibleGroups[0];
     const firstCourse = courses.find(c => c.id === firstGroup?.courseId);
     setForm({
       name: "", phone: "", parentPhone: "",
@@ -80,7 +85,45 @@ export default function StudentsScreen() {
       groupId: firstGroup?.id ?? "",
       status: "active",
     });
+    setAddMode("single");
+    setBulkText("");
     setShowModal(true);
+  };
+
+  const parsedBulk = useMemo(() => {
+    const lines = bulkText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const entries: { name: string; phone: string }[] = [];
+    for (let i = 0; i + 1 < lines.length; i += 2) {
+      entries.push({ name: lines[i], phone: lines[i + 1] });
+    }
+    return { entries, incomplete: lines.length % 2 === 1 };
+  }, [bulkText]);
+
+  const handleBulkSave = async () => {
+    if (!form.groupId) {
+      showAlert("Xato", "Guruhni tanlang");
+      return;
+    }
+    if (parsedBulk.entries.length === 0) {
+      showAlert("Xato", "Ro'yxat bo'sh. Format: ism, keyingi qatorda telefon raqam.");
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      const count = await addStudentsBulk(parsedBulk.entries.map(e => ({
+        name: e.name, phone: e.phone,
+        courseId: form.courseId, groupId: form.groupId,
+        status: "active" as const,
+      })));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowModal(false);
+      setBulkText("");
+      showAlert("Muvaffaqiyatli", `${count} ta o'quvchi qo'shildi.`);
+    } catch (e: any) {
+      showAlert("Xato", e?.message ?? "O'quvchilar qo'shilmadi");
+    } finally {
+      setBulkSaving(false);
+    }
   };
 
   const openEdit = (s: Student) => {
@@ -93,7 +136,7 @@ export default function StudentsScreen() {
   const handleSave = () => {
     if (!form.name.trim() || !form.phone.trim()) return;
     if (!form.groupId) {
-      Alert.alert("Xato", "Guruhni tanlang");
+      showAlert("Xato", "Guruhni tanlang");
       return;
     }
     if (editingStudent) {
@@ -106,17 +149,11 @@ export default function StudentsScreen() {
   };
 
   const handleDelete = (id: string) => {
-    Alert.alert("O'chirishni tasdiqlang", "Bu o'quvchini o'chirmoqchimisiz?", [
-      { text: "Bekor qilish", style: "cancel" },
-      {
-        text: "O'chirish", style: "destructive",
-        onPress: () => {
-          deleteStudent(id);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          setShowModal(false);
-        },
-      },
-    ]);
+    confirmAction("O'chirishni tasdiqlang", "Bu o'quvchini o'chirmoqchimisiz?", () => {
+      deleteStudent(id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setShowModal(false);
+    });
   };
 
   const openDiscountRequest = (s: Student) => {
@@ -144,7 +181,7 @@ export default function StudentsScreen() {
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowDiscountModal(false);
-    Alert.alert("Yuborildi", "Chegirma so'rovnomasi adminga yuborildi. Tasdiqlangach kuchga kiradi.");
+    showAlert("Yuborildi", "Chegirma so'rovnomasi adminga yuborildi. Tasdiqlangach kuchga kiradi.");
   };
 
   const topPadding = isWeb ? 67 : insets.top;
@@ -273,9 +310,76 @@ export default function StudentsScreen() {
         onClose={() => setShowModal(false)}
         title={editingStudent ? "O'quvchini tahrirlash" : "Yangi o'quvchi"}
       >
-        <FormField label="To'liq ism *" value={form.name} onChangeText={v => setForm(p => ({ ...p, name: v }))} placeholder="Ism familiya" autoCapitalize="words" />
-        <FormField label="Telefon raqam *" value={form.phone} onChangeText={v => setForm(p => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
-        <FormField label="Ota-ona telefoni" value={form.parentPhone} onChangeText={v => setForm(p => ({ ...p, parentPhone: v }))} placeholder="+998 90 000 00 00" keyboardType="phone-pad" />
+        {!editingStudent && (
+          <View style={[styles.modeRow, { backgroundColor: colors.muted }]}>
+            {([
+              { key: "single" as const, label: "Bitta qo'shish", icon: "person-add-outline" as const },
+              { key: "bulk" as const, label: "Ro'yxat bilan", icon: "list-outline" as const },
+            ]).map(m => (
+              <TouchableOpacity
+                key={m.key}
+                style={[styles.modeBtn, { backgroundColor: addMode === m.key ? colors.card : "transparent" }]}
+                onPress={() => setAddMode(m.key)}
+              >
+                <Ionicons name={m.icon} size={15} color={addMode === m.key ? colors.primary : colors.mutedForeground} />
+                <Text style={[styles.modeBtnText, {
+                  color: addMode === m.key ? colors.foreground : colors.mutedForeground,
+                  fontFamily: addMode === m.key ? "Inter_600SemiBold" : "Inter_400Regular",
+                }]}>
+                  {m.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {(editingStudent || addMode === "single") && (
+          <>
+            <FormField label="To'liq ism *" value={form.name} onChangeText={v => setForm(p => ({ ...p, name: v }))} placeholder="Ism familiya" autoCapitalize="words" />
+            <FormField label="Telefon raqam *" value={form.phone} onChangeText={v => setForm(p => ({ ...p, phone: v }))} placeholder="+998 90 123 45 67" keyboardType="phone-pad" />
+            <FormField label="Ota-ona telefoni" value={form.parentPhone} onChangeText={v => setForm(p => ({ ...p, parentPhone: v }))} placeholder="+998 90 000 00 00" keyboardType="phone-pad" />
+          </>
+        )}
+
+        {!editingStudent && addMode === "bulk" && (
+          <>
+            <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+              O'quvchilar ro'yxati *
+            </Text>
+            <Text style={[styles.bulkHint, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              Har bir o'quvchi uchun: 1-qator ism, 2-qator telefon raqam.
+            </Text>
+            <TextInput
+              style={[styles.bulkInput, {
+                backgroundColor: colors.input, borderColor: colors.border,
+                color: colors.foreground, fontFamily: "Inter_400Regular",
+              }]}
+              multiline
+              numberOfLines={8}
+              textAlignVertical="top"
+              placeholder={"Ali Valiyev\n+998 90 123 45 67\nOlim Karimov\n+998 91 234 56 78"}
+              placeholderTextColor={colors.mutedForeground}
+              value={bulkText}
+              onChangeText={setBulkText}
+            />
+            {parsedBulk.entries.length > 0 && (
+              <View style={[styles.bulkPreview, { backgroundColor: "#10B98112", borderColor: "#10B98130" }]}>
+                <Ionicons name="checkmark-circle-outline" size={15} color="#10B981" />
+                <Text style={[styles.bulkPreviewText, { color: "#10B981", fontFamily: "Inter_500Medium" }]}>
+                  {parsedBulk.entries.length} ta o'quvchi aniqlandi
+                </Text>
+              </View>
+            )}
+            {parsedBulk.incomplete && (
+              <View style={[styles.bulkPreview, { backgroundColor: "#F59E0B12", borderColor: "#F59E0B30" }]}>
+                <Ionicons name="warning-outline" size={15} color="#F59E0B" />
+                <Text style={[styles.bulkPreviewText, { color: "#F59E0B", fontFamily: "Inter_500Medium" }]}>
+                  Oxirgi qatorda telefon raqam yetishmayapti
+                </Text>
+              </View>
+            )}
+          </>
+        )}
 
         {/* Group selector — for teacher, only own groups; for admin, all */}
         <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Guruh</Text>
@@ -337,16 +441,30 @@ export default function StudentsScreen() {
           </>
         )}
 
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: (!form.name || !form.phone || !form.groupId) ? 0.5 : 1 }]}
-          onPress={handleSave}
-          disabled={!form.name || !form.phone || !form.groupId}
-          activeOpacity={0.85}
-        >
-          <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>
-            {editingStudent ? "Saqlash" : "Qo'shish"}
-          </Text>
-        </TouchableOpacity>
+        {(editingStudent || addMode === "single") ? (
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: (!form.name || !form.phone || !form.groupId) ? 0.5 : 1 }]}
+            onPress={handleSave}
+            disabled={!form.name || !form.phone || !form.groupId}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>
+              {editingStudent ? "Saqlash" : "Qo'shish"}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: (parsedBulk.entries.length === 0 || !form.groupId || bulkSaving) ? 0.5 : 1 }]}
+            onPress={handleBulkSave}
+            disabled={parsedBulk.entries.length === 0 || !form.groupId || bulkSaving}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="people-outline" size={18} color="#FFFFFF" />
+            <Text style={[styles.saveBtnText, { fontFamily: "Inter_600SemiBold" }]}>
+              {bulkSaving ? "Qo'shilmoqda..." : `${parsedBulk.entries.length} ta o'quvchini qo'shish`}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {editingStudent && !isTeacher && (
           <TouchableOpacity
@@ -493,4 +611,21 @@ const styles = StyleSheet.create({
   periodText: { fontSize: 14 },
   noteBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 16, marginTop: 4 },
   noteText: { fontSize: 12, flex: 1, lineHeight: 18 },
+  modeRow: { flexDirection: "row", borderRadius: 12, padding: 4, gap: 4, marginBottom: 16 },
+  modeBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, paddingVertical: 9, borderRadius: 9,
+  },
+  modeBtnText: { fontSize: 13 },
+  bulkHint: { fontSize: 12, marginBottom: 8, lineHeight: 17 },
+  bulkInput: {
+    borderWidth: 1, borderRadius: 12, padding: 12,
+    fontSize: 14, minHeight: 150, marginBottom: 10, lineHeight: 21,
+  },
+  bulkPreview: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 10, borderWidth: 1, marginBottom: 10,
+  },
+  bulkPreviewText: { fontSize: 12 },
 });

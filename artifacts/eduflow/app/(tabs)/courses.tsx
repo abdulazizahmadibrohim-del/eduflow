@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useMemo, useState } from "react";
-import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Course, type Group } from "@/context/AppContext";
+import { confirmAction, showAlert } from "@/lib/confirm";
 import { CourseCard } from "@/components/ui/CourseCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ModalSheet } from "@/components/ui/ModalSheet";
@@ -79,10 +80,10 @@ export default function CoursesScreen() {
     setShowCourseModal(false);
   };
   const deleteCourseHandler = (id: string) => {
-    Alert.alert("O'chirish", "Kursni o'chirmoqchimisiz?", [
-      { text: "Bekor qilish", style: "cancel" },
-      { text: "O'chirish", style: "destructive", onPress: () => { deleteCourse(id); setShowCourseModal(false); } },
-    ]);
+    confirmAction("O'chirish", "Kursni o'chirmoqchimisiz?", () => {
+      deleteCourse(id);
+      setShowCourseModal(false);
+    });
   };
 
   const openAddGroup = () => {
@@ -106,10 +107,10 @@ export default function CoursesScreen() {
     setShowGroupModal(false);
   };
   const deleteGroupHandler = (id: string) => {
-    Alert.alert("O'chirish", "Guruhni o'chirmoqchimisiz?", [
-      { text: "Bekor qilish", style: "cancel" },
-      { text: "O'chirish", style: "destructive", onPress: () => { deleteGroup(id); setShowGroupModal(false); } },
-    ]);
+    confirmAction("O'chirish", "Guruhni o'chirmoqchimisiz?", () => {
+      deleteGroup(id);
+      setShowGroupModal(false);
+    });
   };
 
   const openGroupDiscount = (g: Group) => {
@@ -130,7 +131,7 @@ export default function CoursesScreen() {
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowDiscountModal(false);
-    Alert.alert("Yuborildi", "Guruh uchun chegirma so'rovnomasi adminga yuborildi.");
+    showAlert("Yuborildi", "Guruh uchun chegirma so'rovnomasi adminga yuborildi.");
   };
 
   const topPadding = isWeb ? 67 : insets.top;

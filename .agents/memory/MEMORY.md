@@ -1,1 +1,2 @@
 - [EduFlow Architecture](eduflow-arch.md) — Expo offline-first app; key decisions on types, storage key, and role system.
+- [EduFlow platform quirks](eduflow-platform-quirks.md) — Alert.alert no-op on web (use lib/confirm.ts helpers); reanimated 4.x needs newArch; APK build needs SUPABASE secrets in GitHub repo.

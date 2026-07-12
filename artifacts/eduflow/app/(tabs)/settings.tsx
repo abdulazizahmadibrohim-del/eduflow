@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert, Platform, ScrollView, StyleSheet, Text,
+  Platform, ScrollView, StyleSheet, Text,
   TouchableOpacity, View, useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +14,7 @@ import {
   type SalaryType, type Teacher, type UserRole,
 } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
+import { confirmAction, showAlert } from "@/lib/confirm";
 import { useColors } from "@/hooks/useColors";
 
 const SUBJECT_COLORS: Record<string, string> = {
@@ -167,10 +168,10 @@ export default function SettingsScreen() {
   const pendingRequests = discountRequests.filter(r => r.status === "pending");
 
   const handleLogout = () => {
-    Alert.alert("Chiqish", "Tizimdan chiqmoqchimisiz?", [
-      { text: "Bekor qilish", style: "cancel" },
-      { text: "Chiqish", style: "destructive", onPress: async () => { await logout(); router.replace("/login" as any); } },
-    ]);
+    confirmAction("Chiqish", "Tizimdan chiqmoqchimisiz?", async () => {
+      await logout();
+      router.replace("/login" as any);
+    }, "Chiqish");
   };
 
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -204,7 +205,7 @@ export default function SettingsScreen() {
   const saveTeacher = async () => {
     if (!form.name.trim() || !form.subject.trim()) return;
     if (!editingTeacher && teacherPin.length < 4) {
-      Alert.alert("Xato", "O'qituvchi PIN kodi kamida 4 ta raqam bo'lishi kerak");
+      showAlert("Xato", "O'qituvchi PIN kodi kamida 4 ta raqam bo'lishi kerak");
       return;
     }
     const base = {
@@ -220,10 +221,10 @@ export default function SettingsScreen() {
     setShowTeacherModal(false);
   };
   const confirmDelete = (t: Teacher) => {
-    Alert.alert("O'chirishni tasdiqlang", `${t.name} o'qituvchini o'chirmoqchimisiz?`, [
-      { text: "Bekor qilish", style: "cancel" },
-      { text: "O'chirish", style: "destructive", onPress: () => { deleteTeacher(t.id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } },
-    ]);
+    confirmAction("O'chirishni tasdiqlang", `${t.name} o'qituvchini o'chirmoqchimisiz?`, () => {
+      deleteTeacher(t.id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    });
   };
 
   const openAddDiscount = () => {

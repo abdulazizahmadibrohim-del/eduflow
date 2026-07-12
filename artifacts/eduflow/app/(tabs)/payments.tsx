@@ -3,12 +3,13 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import React, { useMemo, useState } from "react";
 import {
-  Alert, FlatList, Image, Platform, ScrollView,
+  FlatList, Image, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useApp, type Group, type Payment } from "@/context/AppContext";
+import { confirmAction, showAlert } from "@/lib/confirm";
 import { PaymentCard } from "@/components/ui/PaymentCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ModalSheet } from "@/components/ui/ModalSheet";
@@ -33,7 +34,7 @@ export default function PaymentsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isWeb = Platform.OS === "web";
-  const { user, students, courses, groups, payments, addPayment, addTransaction } = useApp();
+  const { user, students, courses, groups, payments, addPayment, deletePayment, addTransaction } = useApp();
 
   const isAdmin = (user?.role ?? "admin") === "admin";
   const isTeacher = user?.role === "teacher";
@@ -67,6 +68,7 @@ export default function PaymentsScreen() {
   const [showModal, setShowModal] = useState(false);
   const [showTxModal, setShowTxModal] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState<string>("");
+  const [modalGroupId, setModalGroupId] = useState<string>("all");
   const [form, setForm] = useState({
     studentId: "", amount: "", month: new Date().toISOString().slice(0, 7),
     status: "pending" as Payment["status"], note: "", method: "cash" as "cash" | "card",
@@ -137,8 +139,11 @@ export default function PaymentsScreen() {
 
   // ---------- HANDLERS ----------
   const openAdd = () => {
-    const firstStudent = visibleStudents[0];
+    const initialGroup = groupFilter !== "all" ? groupFilter : "all";
+    const pool = initialGroup === "all" ? visibleStudents : visibleStudents.filter(s => s.groupId === initialGroup);
+    const firstStudent = pool[0];
     const course = courses.find(c => c.id === firstStudent?.courseId);
+    setModalGroupId(initialGroup);
     setForm({
       studentId: firstStudent?.id ?? "",
       amount: course?.price.toString() ?? "",
@@ -150,11 +155,41 @@ export default function PaymentsScreen() {
     setShowModal(true);
   };
 
+  const modalStudents = useMemo(() => {
+    if (modalGroupId === "all") return visibleStudents;
+    return visibleStudents.filter(s => s.groupId === modalGroupId);
+  }, [visibleStudents, modalGroupId]);
+
+  const selectModalGroup = (gid: string) => {
+    setModalGroupId(gid);
+    const pool = gid === "all" ? visibleStudents : visibleStudents.filter(s => s.groupId === gid);
+    const first = pool[0];
+    const course = courses.find(c => c.id === first?.courseId);
+    setForm(p => ({ ...p, studentId: first?.id ?? "", amount: course?.price.toString() ?? p.amount }));
+  };
+
+  const handleDeletePayment = (payment: Payment) => {
+    const student = students.find(s => s.id === payment.studentId);
+    confirmAction(
+      "To'lovni bekor qilish",
+      `${student?.name ?? "O'quvchi"} uchun ${payment.month} oyidagi ${payment.amount.toLocaleString()} so'mlik to'lov o'chiriladi. Davom etasizmi?`,
+      async () => {
+        try {
+          await deletePayment(payment.id);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (e: any) {
+          showAlert("Xato", e?.message ?? "To'lovni o'chirib bo'lmadi");
+        }
+      },
+      "Bekor qilish (o'chirish)",
+    );
+  };
+
   const handleSave = () => {
     if (!form.studentId || !form.amount) return;
     const exists = payments.find(p => p.studentId === form.studentId && p.month === form.month);
     if (exists) {
-      Alert.alert("Takroriy to'lov", `Bu o'quvchi uchun ${form.month} oyida to'lov allaqachon mavjud.`);
+      showAlert("Takroriy to'lov", `Bu o'quvchi uchun ${form.month} oyida to'lov allaqachon mavjud.`);
       return;
     }
     addPayment({
@@ -377,6 +412,7 @@ export default function PaymentsScreen() {
                 student={students.find(s => s.id === item.studentId)}
                 onMarkPaid={canManagePayments ? () => openTxModal(item.id) : undefined}
                 onAddTransaction={canManagePayments ? () => openTxModal(item.id) : undefined}
+                onDelete={canManagePayments && (item.status === "pending" || item.status === "overdue") ? () => handleDeletePayment(item) : undefined}
               />
             )}
             contentContainerStyle={[styles.list, { paddingBottom: isWeb ? 34 + 80 : 80 }]}
@@ -581,9 +617,36 @@ export default function PaymentsScreen() {
       {/* New Payment Modal */}
       {canManagePayments && (
         <ModalSheet visible={showModal} onClose={() => setShowModal(false)} title="Yangi to'lov">
+          <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>Guruh</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modalGroupRow}>
+            <TouchableOpacity
+              style={[styles.groupChip, { backgroundColor: modalGroupId === "all" ? colors.secondary : colors.muted }]}
+              onPress={() => selectModalGroup("all")}
+            >
+              <Text style={[styles.chipText, { color: modalGroupId === "all" ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                Barchasi
+              </Text>
+            </TouchableOpacity>
+            {visibleGroups.map(g => (
+              <TouchableOpacity
+                key={g.id}
+                style={[styles.groupChip, { backgroundColor: modalGroupId === g.id ? colors.secondary : colors.muted }]}
+                onPress={() => selectModalGroup(g.id)}
+              >
+                <Text style={[styles.chipText, { color: modalGroupId === g.id ? "#FFFFFF" : colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>
+                  {g.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
           <Text style={[styles.pickerLabel, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}>O'quvchi</Text>
+          {modalStudents.length === 0 && (
+            <Text style={[styles.emptyModalText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              Bu guruhda o'quvchi yo'q
+            </Text>
+          )}
           <View style={styles.selectorColumn}>
-            {visibleStudents.map(s => {
+            {modalStudents.map(s => {
               const course = courses.find(c => c.id === s.courseId);
               return (
                 <TouchableOpacity
@@ -734,6 +797,8 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   groupChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   chipText: { fontSize: 12 },
+  modalGroupRow: { flexDirection: "row", gap: 8, paddingBottom: 12 },
+  emptyModalText: { fontSize: 13, fontStyle: "italic", marginBottom: 12 },
   list: { paddingTop: 4 },
   // Report tab
   reportScroll: { paddingTop: 12, paddingHorizontal: 16, gap: 14 },

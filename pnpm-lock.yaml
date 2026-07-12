@@ -219,10 +219,6 @@ importers:
 
   artifacts/eduflow:
     dependencies:
-      '@supabase/supabase-js':
-        specifier: ^2.110.0
-        version: 2.110.0
-    devDependencies:
       '@babel/core':
         specifier: ^7.25.2
         version: 7.29.7
@@ -244,6 +240,9 @@ importers:
       '@stardazed/streams-text-encoding':
         specifier: ^1.0.2
         version: 1.0.2
+      '@supabase/supabase-js':
+        specifier: ^2.110.0
+        version: 2.110.0
       '@tanstack/react-query':
         specifier: ^5.90.21
         version: 5.101.0(react@19.1.0)

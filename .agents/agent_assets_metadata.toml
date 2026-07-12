@@ -17,3 +17,9 @@ id = "WsQ6OM5hS0toUuxf8FFnS"
 uri = "file://eduflow-source.zip"
 type = "unspecified"
 title = "EduFlow Source Code (APK uchun)"
+
+[[outputs]]
+id = "0sPxd4Kkl011vPC0duVRe"
+uri = "file://artifacts/eduflow/eduflow-vercel.zip"
+type = "unspecified"
+title = "EduFlow – Vercel uchun to'g'ri ZIP"
